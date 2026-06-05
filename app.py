@@ -1,0 +1,784 @@
+import streamlit as pd_st
+import pandas as pd
+import sqlite3
+from datetime import datetime, date
+import plotly.express as px
+import io
+import hashlib
+
+# 1. CONFIGURATION DE LA PAGE
+pd_st.set_page_config(page_title="Salle Victoria - Management", layout="wide", page_icon="🏢")
+
+# --- CHARTE GRAPHIQUE COMPLÈTE ---
+COLOR_PRIMARY = "#1E293B"  # Ardoise Sombre
+COLOR_CARD_BG = "#F8FAFC"   # Fond de carte clair
+COLOR_REVENUE = "#10B981"  # Vert Émeraude
+COLOR_EXPENSE = "#EF4444"  # Rouge Corail
+
+# --- INJECTION DU DESIGN CSS PERSONNALISÉ ---
+pd_st.markdown(f"""
+    <style>
+        /* Barre supérieure horizontale fixe */
+        .top-navbar {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: {COLOR_PRIMARY};
+            color: white;
+            text-align: center;
+            padding: 15px 0;
+            font-size: 22px;
+            font-weight: 700;
+            z-index: 9999;
+            box-shadow: 0 4px 6px rgb(0 0 0 / 0.1);
+            letter-spacing: 1px;
+        }}
+        
+        /* CORRECTIF ESSENTIEL POUR EMPECHER LE CONTENU CACHÉ */
+        .stApp {{
+            margin-top: 50px !important;
+        }}
+        
+        /* Style général de l'application */
+        .main {{ background-color: #FFFFFF; }}
+        
+        /* Design des cartes KPI personnalisées */
+        .kpi-card {{
+            background-color: {COLOR_CARD_BG};
+            padding: 24px;
+            border-radius: 12px;
+            border-left: 5px solid #64748B;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+            margin-bottom: 15px;
+        }}
+        .kpi-revenue {{ border-left-color: {COLOR_REVENUE}; }}
+        .kpi-expense {{ border-left-color: {COLOR_EXPENSE}; }}
+        .kpi-solde {{ border-left-color: #3B82F6; }}
+        
+        .kpi-title {{
+            color: #64748B;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }}
+        .kpi-value {{
+            color: #0F172A;
+            font-size: 28px;
+            font-weight: 700;
+        }}
+        
+        /* En-têtes stylisés */
+        h1, h2, h3 {{
+            color: #1E293B !important;
+            font-weight: 700 !important;
+        }}
+        
+        /* Widget utilisateur en haut de la sidebar */
+        .user-badge {{
+            background-color: #F1F5F9;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 10px;
+            border: 1px solid #E2E8F0;
+            color: #334155;
+            font-weight: 600;
+        }}
+    </style>
+""", unsafe_allow_html=True)
+
+# --- BASE DE DONNÉES ---
+def init_db():
+    conn = sqlite3.connect("victoria_hall.db")
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                        username TEXT PRIMARY KEY, password TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS reservations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        client TEXT, date_event TEXT, event_name TEXT, status TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS receipts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        res_id INTEGER, date_pay TEXT, amount REAL, method TEXT, ref TEXT, notes TEXT,
+                        FOREIGN KEY(res_id) REFERENCES reservations(id))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS expenses (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        category TEXT, amount REAL, date_exp TEXT, desc TEXT, status TEXT)''')
+    
+    cursor.execute("SELECT * FROM users")
+    if not cursor.fetchone():
+        hashed_pw = hashlib.sha256("admin123".encode()).hexdigest()
+        cursor.execute("INSERT INTO users VALUES (?, ?)", ("admin", hashed_pw))
+        
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def query_db(query, params=(), is_select=True):
+    conn = sqlite3.connect("victoria_hall.db")
+    if is_select:
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        return df
+    else:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        conn.commit()
+        conn.close()
+
+# --- GESTION DE LA SESSION ---
+if 'logged_in' not in pd_st.session_state:
+    pd_st.session_state['logged_in'] = False
+if 'username' not in pd_st.session_state:
+    pd_st.session_state['username'] = ""
+
+def login_user(username, password):
+    hashed_pw = hashlib.sha256(password.encode()).hexdigest()
+    res = query_db("SELECT * FROM users WHERE username = ? AND password = ?", (username, hashed_pw))
+    return not res.empty
+
+# --- ÉCRAN DE CONNEXION (LOGIN) ---
+if not pd_st.session_state['logged_in']:
+    col_l1, col_l2, col_l3 = pd_st.columns([1, 1.5, 1])
+    with col_l2:
+        pd_st.markdown("<br><br><br>", unsafe_allow_html=True)
+        pd_st.markdown("<div style='text-align: center;'><h1>🏢 Salle Victoria</h1><p style='color:#64748B;'>Système de Gestion Sécurisé</p></div>", unsafe_allow_html=True)
+        
+        with pd_st.container():
+            pd_st.markdown("<div style='background-color:#F8FAFC; padding:30px; border-radius:12px; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);'>", unsafe_allow_html=True)
+            input_user = pd_st.text_input("Identifiant")
+            password = pd_st.text_input("Mot de passe", type="password")
+            btn_connect = pd_st.button("Se connecter", use_container_width=True)
+            pd_st.markdown("</div>", unsafe_allow_html=True)
+            
+            if btn_connect:
+                if login_user(input_user, password):
+                    pd_st.session_state['logged_in'] = True
+                    pd_st.session_state['username'] = input_user
+                    pd_st.success("Connexion réussie !")
+                    pd_st.rerun()
+                else:
+                    pd_st.error("Identifiant ou mot de passe incorrect.")
+    pd_st.stop()
+
+# --- APPLICATION PRINCIPALE (ACCÈS APRÈS LOGIN) ---
+
+# 1. Barre supérieure fixe
+pd_st.markdown('<div class="top-navbar">⚙️ GESTION SÉCURISÉE - SALLE VICTORIA</div>', unsafe_allow_html=True)
+
+# 2. Zone Utilisateur dans la sidebar
+pd_st.sidebar.markdown(f'<div class="user-badge">👤 Administrateur : {pd_st.session_state["username"].upper()}</div>', unsafe_allow_html=True)
+
+if pd_st.sidebar.button("🚪 Déconnexion", use_container_width=True):
+    pd_st.session_state['logged_in'] = False
+    pd_st.session_state['username'] = ""
+    pd_st.rerun()
+
+pd_st.sidebar.markdown("---")
+
+# Navigation nettoyée sans icônes pour éviter les bogues d'affichage textuels
+menu = pd_st.sidebar.radio("Navigation Principale", [
+    "Tableau de Bord", 
+    "Reservations", 
+    "Recus et Paiements", 
+    "Gestion des Depenses", 
+    "Comptabilite et Rapports"
+])
+
+# --- 1. TABLEAU DE BORD ---
+# --- 1. TABLEAU DE BORD (AVEC FILTRE MENSUEL AUTOMATIQUE) ---
+if menu == "Tableau de Bord":
+    pd_st.title("📊 Tableau de Bord")
+    pd_st.markdown("Suivi des performances et de la rentabilité de la Salle Victoria.")
+    pd_st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Extraction brute de la base de données
+    df_res = query_db("SELECT * FROM reservations")
+    df_rec = query_db("SELECT * FROM receipts")
+    df_exp = query_db("SELECT * FROM expenses")
+    
+    # --- FILTRE PAR MOIS ---
+    pd_st.subheader("🔍 Période d'analyse")
+    
+    # Créer une liste unique de tous les mois disponibles dans le système (ex: 2026-06)
+    tous_les_mois = set()
+    if not df_rec.empty:
+        tous_les_mois.update(pd.to_datetime(df_rec['date_pay']).dt.strftime('%Y-%m').tolist())
+    if not df_exp.empty:
+        tous_les_mois.update(pd.to_datetime(df_exp['date_exp']).dt.strftime('%Y-%m').tolist())
+        
+    liste_mois = sorted(list(tous_les_mois), reverse=True)
+    mois_actuel = datetime.now().strftime('%Y-%m')
+    
+    # Ajouter le mois en cours par défaut s'il n'y a pas encore d'écriture
+    if mois_actuel not in liste_mois:
+        liste_mois.insert(0, mois_actuel)
+        
+    # Interface de filtrage
+    col_f1, col_f2 = pd_st.columns(2)
+    with col_f1:
+        mode_filtre = pd_st.radio("Choisir la vue :", ["Mois en cours / Sélectionné", "Historique Global (Toutes périodes)"], horizontal=True)
+    with col_f2:
+        selection_mois = pd_st.selectbox("Sélectionner le mois à analyser :", liste_mois, index=liste_mois.index(mois_actuel))
+        
+    # Application du filtre sur les données
+    if mode_filtre == "Mois en cours / Sélectionné":
+        pd_st.info(f"📅 Affichage des résultats pour le mois de : **{selection_mois}**")
+        if not df_rec.empty:
+            df_rec = df_rec[pd.to_datetime(df_rec['date_pay']).dt.strftime('%Y-%m') == selection_mois]
+        if not df_exp.empty:
+            df_exp = df_exp[pd.to_datetime(df_exp['date_exp']).dt.strftime('%Y-%m') == selection_mois]
+        if not df_res.empty:
+            df_res = df_res[pd.to_datetime(df_res['date_event']).dt.strftime('%Y-%m') == selection_mois]
+    else:
+        pd_st.info("🌍 Affichage de l'historique financier global (Cumul de tous les mois)")
+
+    # Calcul des indicateurs filtrés
+    total_rev = df_rec['amount'].sum() if not df_rec.empty else 0.0
+    total_exp = df_exp['amount'].sum() if not df_exp.empty else 0.0
+    solde = total_rev - total_exp
+    
+    # Affichage des Cartes KPI (Mises à jour selon le filtre)
+    pd_st.markdown("<br>", unsafe_allow_html=True)
+    col1, col2, col3, col4 = pd_st.columns(4)
+    with col1:
+        pd_st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Réservations (Période)</div><div class='kpi-value'>{len(df_res)}</div></div>", unsafe_allow_html=True)
+    with col2:
+        pd_st.markdown(f"<div class='kpi-card kpi-revenue'><div class='kpi-title'>Revenus (Période)</div><div class='kpi-value'>{total_rev:,.2f} $</div></div>", unsafe_allow_html=True)
+    with col3:
+        pd_st.markdown(f"<div class='kpi-card kpi-expense'><div class='kpi-title'>Dépenses (Période)</div><div class='kpi-value'>{total_exp:,.2f} $</div></div>", unsafe_allow_html=True)
+    with col4:
+        pd_st.markdown(f"<div class='kpi-card kpi-solde'><div class='kpi-title'>Solde (Période)</div><div class='kpi-value'>{solde:,.2f} $</div></div>", unsafe_allow_html=True)
+    
+    # Section Graphique Évolution
+    pd_st.markdown("<br>", unsafe_allow_html=True)
+    pd_st.subheader("📈 Graphique Comparatif")
+    
+    # Recharger les données globales uniquement pour le graphique pour toujours voir la tendance
+    df_g_rec = query_db("SELECT * FROM receipts")
+    df_g_exp = query_db("SELECT * FROM expenses")
+    
+    if not df_g_rec.empty or not df_g_exp.empty:
+        if not df_g_rec.empty:
+            df_g_rec['mois'] = pd.to_datetime(df_g_rec['date_pay']).dt.strftime('%Y-%m')
+            rev_mensuel = df_g_rec.groupby('mois')['amount'].sum().reset_index().rename(columns={'amount': 'Revenus'})
+        else:
+            rev_mensuel = pd.DataFrame(columns=['mois', 'Revenus'])
+            
+        if not df_g_exp.empty:
+            df_g_exp['mois'] = pd.to_datetime(df_g_exp['date_exp']).dt.strftime('%Y-%m')
+            exp_mensuel = df_g_exp.groupby('mois')['amount'].sum().reset_index().rename(columns={'amount': 'Dépenses'})
+        else:
+            exp_mensuel = pd.DataFrame(columns=['mois', 'Dépenses'])
+            
+        df_fusion = pd.merge(rev_mensuel, exp_mensuel, on='mois', how='outer').fillna(0.0)
+        df_fusion = df_fusion.sort_values('mois')
+        df_fusion['Revenus'] = df_fusion['Revenus'].astype(float)
+        df_fusion['Dépenses'] = df_fusion['Dépenses'].astype(float)
+        
+        fig = px.bar(df_fusion, x='mois', y=['Revenus', 'Dépenses'], barmode='group',
+                     color_discrete_map={'Revenus': COLOR_REVENUE, 'Dépenses': COLOR_EXPENSE},
+                     template="simple_white",
+                     labels={'mois': 'Mois', 'value': 'Montant ($)', 'variable': 'Flux'})
+        
+        fig.update_layout(margin=dict(l=20, r=20, t=10, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        pd_st.plotly_chart(fig, use_container_width=True)
+    else:
+        pd_st.info("Aucune transaction enregistrée pour bâtir le graphique.")
+
+
+# --- 2. GESTION DES RÉSERVATIONS ---
+# --- 2. GESTION DES RÉSERVATIONS (AVEC STATUT CHRONOLOGIQUE) ---
+elif menu == "Reservations":
+    pd_st.title("📅 Gestion des Réservations")
+    tab1, tab2 = pd_st.tabs(["✨ Nouvelle Réservation", "🔍 Liste & Disponibilités"])
+    
+    with tab1:
+        form_res = pd_st.form(key="my_form_reservation", clear_on_submit=True)
+        client = form_res.text_input("Nom Complet du Client")
+        date_ev = form_res.date_input("Date de l'événement", min_value=date.today())
+        event_name = form_res.text_input("Nom / Nature de l'événement")
+        status = form_res.selectbox("Statut Initial du Paiement", ["Non payé", "Payé"])
+        submit_res = form_res.form_submit_button("Sauvegarder la réservation")
+        
+        if submit_res:
+            if client and event_name:
+                check = query_db("SELECT id FROM reservations WHERE date_event = ?", (str(date_ev),))
+                if not check.empty:
+                    pd_st.error(f"❌ Un événement est déjà prévu pour le {date_ev} !")
+                else:
+                    query_db("INSERT INTO reservations (client, date_event, event_name, status) VALUES (?, ?, ?, ?)",
+                             (client, str(date_ev), event_name, status), is_select=False)
+                    pd_st.success("✅ Réservation verrouillée avec succès !")
+                    pd_st.rerun()
+            else:
+                pd_st.warning("⚠️ Veuillez remplir tous les champs du formulaire.")
+                    
+    with tab2:
+        pd_st.subheader("🔍 Filtrer & Rechercher")
+        
+        if 'filter_date' not in pd_st.session_state:
+            pd_st.session_state.filter_date = None
+            
+        col_search1, col_search2 = pd_st.columns(2)
+        with col_search1:
+            search_d = pd_st.date_input("Sélectionnez une date pour filtrer", value=date.today())
+            if pd_st.button("🔍 Appliquer le filtre par Date"):
+                pd_st.session_state.filter_date = str(search_d)
+        with col_search2:
+            pd_st.markdown("<br>", unsafe_allow_html=True)
+            if pd_st.button("🔄 Afficher tout (Retirer le filtre)"):
+                pd_st.session_state.filter_date = None
+                pd_st.rerun()
+                
+        # Extraction brute des données
+        if pd_st.session_state.filter_date:
+            df_all_res = query_db("SELECT id as 'ID', client as 'Client', date_event as 'Date Événement', event_name as 'Événement', status as 'Paiement' FROM reservations WHERE date_event = ?", (pd_st.session_state.filter_date,))
+        else:
+            df_all_res = query_db("SELECT id as 'ID', client as 'Client', date_event as 'Date Événement', event_name as 'Événement', status as 'Paiement' FROM reservations ORDER BY date_event DESC")
+            
+        if not df_all_res.empty:
+            # --- CALCUL AUTOMATIQUE DU STATUT CHRONOLOGIQUE ---
+            aujourdhui = date.today()
+            
+            def verifier_chronologie(row_date_str):
+                try:
+                    date_objet = datetime.strptime(row_date_str, "%Y-%m-%d").date()
+                    if date_objet < aujourdhui:
+                        return "⚫ Terminé"
+                    else:
+                        return "🟢 À venir"
+                except:
+                    return "❓ Inconnu"
+            
+            # Injection de la nouvelle colonne calculée
+            df_all_res['Déroulement'] = df_all_res['Date Événement'].apply(verifier_chronologie)
+            
+            # Réorganisation visuelle des colonnes
+            colonnes_ordonnees = ['ID', 'Client', 'Date Événement', 'Événement', 'Déroulement', 'Paiement']
+            pd_st.dataframe(df_all_res[colonnes_ordonnees], use_container_width=True, hide_index=True)
+            
+                        # --- BOUTON D'EXPORT EXCEL DES RÉSERVATIONS ---
+            pd_st.markdown("<br>", unsafe_allow_html=True)
+            buffer_res = io.BytesIO()
+            with pd.ExcelWriter(buffer_res, engine='openpyxl') as writer:
+                df_all_res[colonnes_ordonnees].to_excel(writer, index=False, sheet_name='Planning_Victoria')
+            
+            pd_st.download_button(
+                label="📥 Télécharger le planning des réservations sous Excel (.xlsx)",
+                data=buffer_res.getvalue(),
+                file_name=f"reservations_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+            # --- ZONE DES ACTIONS ---
+            pd_st.markdown("---")
+            pd_st.subheader("🛠️ Actions sur une réservation")
+            
+            res_options = {
+                f"{row['Client']} — {row['Événement']} (ID {row['ID']})": row['ID'] 
+                for _, row in df_all_res.iterrows()
+            }
+            
+            selected_desc = pd_st.selectbox("Sélectionnez le client à modifier ou supprimer", list(res_options.keys()))
+            selected_id = res_options[selected_desc]
+            
+            row_data = query_db("SELECT * FROM reservations WHERE id = ?", (int(selected_id),)).iloc[0]
+            
+            col_act1, col_act2 = pd_st.columns(2)
+            
+            with col_act1:
+                pd_st.markdown("**✏️ Formulaire de Modification**")
+                with pd_st.form(key=f"edit_form_{selected_id}"):
+                    edit_client = pd_st.text_input("Nom du Client", value=row_data['client'])
+                    edit_name = pd_st.text_input("Nature de l'événement", value=row_data['event_name'])
+                    edit_status = pd_st.selectbox("Statut du Paiement", ["Non payé", "Payé"], index=0 if row_data['status'] == "Non payé" else 1)
+                    submit_edit = pd_st.form_submit_button("💾 Enregistrer les modifications")
+                    
+                    if submit_edit:
+                        query_db("UPDATE reservations SET client = ?, event_name = ?, status = ? WHERE id = ?", 
+                                 (edit_client, edit_name, edit_status, int(selected_id)), is_select=False)
+                        pd_st.success("✅ Réservation modifiée avec succès !")
+                        pd_st.rerun()
+                        
+            with col_act2:
+                pd_st.markdown("**❌ Zone de Suppression**")
+                pd_st.warning(f"Attention, vous allez supprimer la réservation de : {row_data['client']}.")
+                if pd_st.button("🗑️ Supprimer définitivement cette réservation", use_container_width=True):
+                    query_db("DELETE FROM receipts WHERE res_id = ?", (int(selected_id),), is_select=False)
+                    query_db("DELETE FROM reservations WHERE id = ?", (int(selected_id),), is_select=False)
+                    pd_st.success("🗑️ Réservation supprimée avec succès !")
+                    pd_st.rerun()
+        else:
+            pd_st.info("Aucune réservation enregistrée en cette date.")
+
+# --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
+# --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
+elif menu == "Recus et Paiements":
+    pd_st.title("💵 Suivi des Avances & Paiements par Tranches")
+    
+    tab_pay1, tab_pay2 = pd_st.tabs(["✨ Enregistrer une Avance / Paiement", "🔍 Historique complet des Versements"])
+    
+    # Récupérer toutes les réservations
+    df_res = query_db("SELECT id, client, event_name FROM reservations")
+    
+    with tab_pay1:
+        if df_res.empty:
+            pd_st.warning("⚠️ Aucune réservation trouvée. Veuillez d'abord ajouter une réservation.")
+        else:
+            # Sélection du client par Nom + Événement
+            res_options = {
+                f"{row['client']} — {row['event_name']} (ID {row['id']})": row['id'] 
+                for _, row in df_res.iterrows()
+            }
+            
+            selected_res = pd_st.selectbox("Sélectionner la réservation du client :", list(res_options.keys()))
+            res_id = res_options[selected_res]
+            
+            # --- CALCUL DU SUIVI DES AVANCES ---
+            # Récupérer la somme de tous les versements déjà effectués pour cette réservation
+            df_deja_paye = query_db("SELECT SUM(amount) as total FROM receipts WHERE res_id = ?", (res_id,))
+            deja_paye = df_deja_paye['total'].iloc[0] if not df_deja_paye.empty and df_deja_paye['total'].iloc[0] is not None else 0.0
+            
+            # Formulaire d'encaissement de la nouvelle tranche
+            pd_st.markdown("---")
+            pd_st.markdown(f"📊 **État actuel pour ce client :** Déjà versé au total : `{deja_paye:,.2f} $`")
+            
+            form_pay = pd_st.form(key="form_enregistrement_avance", clear_on_submit=True)
+            form_pay.markdown("### Enregistrer un nouveau versement (Avance)")
+            date_pay = form_pay.date_input("Date du versement", value=date.today())
+            amount = form_pay.number_input("Montant de cette avance ($)", min_value=0.0, step=50.0)
+            method = form_pay.selectbox("Mode de paiement", ["Espèces", "Virement", "Chèque", "Mobile Money"])
+            ref = form_pay.text_input("Référence de la transaction (N° reçu, N° transfert...)")
+            notes = form_pay.text_area("Note (ex: 'Deuxième avance', 'Solde final'...)")
+            submit_pay = form_pay.form_submit_button("🔒 Valider et Émettre le reçu pour cette tranche")
+            
+            if submit_pay:
+                if amount > 0:
+                    # Insérer le versement comme une nouvelle ligne (historique des tranches)
+                    query_db("""INSERT INTO receipts (res_id, date_pay, amount, method, ref, notes) 
+                                VALUES (?, ?, ?, ?, ?, ?)""",
+                             (res_id, str(date_pay), amount, method, ref, notes), is_select=False)
+                    
+                    # Mettre automatiquement à jour le statut global de la réservation sur "Payé" 
+                    query_db("UPDATE reservations SET status = 'Payé' WHERE id = ?", (res_id,), is_select=False)
+                    
+                    pd_st.success(f"✅ Avance de {amount:,.2f} $ enregistrée ! Nouveau total versé : {(deja_paye + amount):,.2f} $")
+                    pd_st.rerun()
+                else:
+                    form_pay.error("❌ Le montant doit être supérieur à 0 $.")
+                    
+    with tab_pay2:
+        pd_st.subheader("📋 Historique chronologique de toutes les tranches versées")
+        
+        # Journal d'affichage complet de chaque ticket de paiement émis
+        df_receipts_all = query_db("""
+            SELECT r.id as 'N° Reçu', res.id as 'ID Res', res.client as 'Nom Client', res.event_name as 'Type Événement', 
+            r.date_pay as 'Date Versement', r.amount as 'Montant Versé ($)', r.method as 'Mode Réglement', r.notes as 'Détails Tranche'
+            FROM receipts r JOIN reservations res ON r.res_id = res.id ORDER BY r.id DESC
+        """)
+        
+        if not df_receipts_all.empty:
+            # Afficher chaque versement individuel
+            pd_st.dataframe(df_receipts_all.drop(columns=['ID Res']), use_container_width=True, hide_index=True)
+            
+            # --- SYNTHÈSE PAR CLIENT (Suivi du cumul de ses acomptes) ---
+            pd_st.markdown("---")
+            pd_st.subheader("📈 Point de situation global par Client")
+            
+            # Calculer la somme totale versée par chaque client pour sa réservation
+            df_synthese_clients = query_db("""
+                SELECT res.client as 'Nom Client', res.event_name as 'Événement', 
+                COUNT(r.id) as 'Nombre de Versements', SUM(r.amount) as 'Total Cumulé ($)'
+                FROM reservations res 
+                LEFT JOIN receipts r ON res.id = r.res_id 
+                GROUP BY res.id
+            """)
+            pd_st.dataframe(df_synthese_clients, use_container_width=True, hide_index=True)
+            
+            # Bouton d'export Excel de tout l'historique des paiements
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_receipts_all.drop(columns=['ID Res']).to_excel(writer, index=False, sheet_name='Suivi_Avances_Victoria')
+            
+            pd_st.download_button(
+                label="📥 Télécharger le grand livre des avances sous Excel (.xlsx)",
+                data=buffer.getvalue(),
+                file_name=f"suivi_avances_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+            # --- ACTIONS : MODIFIER / SUPPRIMER UNE AVANCE ---
+            pd_st.markdown("---")
+            pd_st.subheader("🛠️ Annuler ou corriger une tranche spécifique")
+            
+            receipt_options = {
+                f"Reçu N° {row['N° Reçu']} — {row['Nom Client']} ({row['Montant Versé ($)']} $)": row['N° Reçu']
+                for _, row in df_receipts_all.iterrows()
+            }
+            
+            selected_receipt_desc = pd_st.selectbox("Sélectionnez le ticket de versement à modifier/supprimer", list(receipt_options.keys()))
+            selected_receipt_id = receipt_options[selected_receipt_desc]
+            
+                        # Charger les données actuelles du reçu de manière sécurisée (Ligne corrigée)
+            df_target = query_db("SELECT * FROM receipts WHERE id = ?", (int(selected_receipt_id),))
+            
+            if not df_target.empty:
+                # Extraction propre de la première ligne du tableau
+                rec_data = df_target.iloc[0]
+                
+                col_rec_act1, col_rec_act2 = pd_st.columns(2)
+                
+                with col_rec_act1:
+                    pd_st.markdown("**✏️ Modifier cette tranche**")
+                    with pd_st.form(key=f"edit_receipt_form_{selected_receipt_id}"):
+                        edit_amount = pd_st.number_input("Corriger le Montant de cette tranche ($)", min_value=0.0, value=float(rec_data['amount']))
+                        
+                        # Gestion sécurisée de l'index du mode de paiement
+                        modes_dispo = ["Espèces", "Virement", "Chèque", "Mobile Money"]
+                        mode_actuel = rec_data['method'] if rec_data['method'] in modes_dispo else "Espèces"
+                        index_defaut = modes_dispo.index(mode_actuel)
+                        
+                        edit_method = pd_st.selectbox("Mode de versement", modes_dispo, index=index_defaut)
+                        edit_ref = pd_st.text_input("Référence de transaction", value=str(rec_data['ref']))
+                        edit_notes = pd_st.text_area("Observations", value=str(rec_data['notes']))
+                        submit_edit_rec = pd_st.form_submit_button("💾 Enregistrer les corrections")
+                        
+                        if submit_edit_rec:
+                            query_db("""UPDATE receipts SET amount = ?, method = ?, ref = ?, notes = ? 
+                                        WHERE id = ?""", 
+                                     (edit_amount, edit_method, edit_ref, edit_notes, int(selected_receipt_id)), is_select=False)
+                            pd_st.success("✅ La tranche de paiement a été corrigée !")
+                            pd_st.rerun()
+                            
+                with col_rec_act2:
+                    pd_st.markdown("**❌ Supprimer cette tranche**")
+                    pd_st.warning(f"Vous allez supprimer définitivement le versement de {rec_data['amount']} $. Le total payé par le client diminuera.")
+                    if pd_st.button("🗑️ Supprimer ce versement", use_container_width=True, key=f"del_rec_{selected_receipt_id}"):
+                        linked_res_id = int(rec_data['res_id'])
+                        query_db("DELETE FROM receipts WHERE id = ?", (int(selected_receipt_id),), is_select=False)
+                        
+                        # Si plus aucun versement n'existe pour cette réservation, elle redevient "Non payé"
+                        remains = query_db("SELECT id FROM receipts WHERE res_id = ?", (linked_res_id,))
+                        if remains.empty:
+                            query_db("UPDATE reservations SET status = 'Non payé' WHERE id = ?", (linked_res_id,), is_select=False)
+                            
+                        pd_st.success("🗑️ Versement supprimé et calculs mis à jour !")
+                        pd_st.rerun()
+# --- 4. GESTION ET SUIVI DES DÉPENSES ---
+elif menu == "Gestion des Depenses":
+    pd_st.title("📉 Contrôle & Suivi des Dépenses")
+    
+    tab_exp1, tab_exp2 = pd_st.tabs(["✨ Enregistrer une Dépense", "🔍 Historique, Actions & Export"])
+    
+    with tab_exp1:
+        # Formulaire d'insertion robuste rattaché à son objet formulaire
+        form_exp = pd_st.form(key="form_saisie_depense", clear_on_submit=True)
+        form_exp.markdown("### Saisie d'une nouvelle sortie de caisse")
+        category = form_exp.selectbox("Rubrique / Catégorie de Charge", ["Énergie", "Entretien", "Fournitures", "Salaire", "Assurances", "Taxes", "Autres"])
+        amount = form_exp.number_input("Montant Décaissé ($)", min_value=0.0, step=50.0)
+        date_exp = form_exp.date_input("Date comptable de la dépense", value=date.today())
+        desc = form_exp.text_input("Bénéficiaire / Motif de la dépense (ex: SNEL, Facture Nettoyage...)")
+        status_exp = form_exp.selectbox("Statut du règlement", ["Payé", "En attente"])
+        submit_exp = form_exp.form_submit_button("🔒 Valider et comptabiliser la dépense")
+        
+        if submit_exp:
+            if amount > 0 and desc:
+                query_db("INSERT INTO expenses (category, amount, date_exp, desc, status) VALUES (?, ?, ?, ?, ?)",
+                         (category, amount, str(date_exp), desc, status_exp), is_select=False)
+                pd_st.success(f"✅ Dépense de {amount:,.2f} $ enregistrée avec succès pour '{desc}' !")
+                pd_st.rerun()
+            else:
+                form_exp.error("❌ Veuillez saisir un montant supérieur à 0 $ et indiquer un bénéficiaire/motif.")
+                
+    with tab_exp2:
+        pd_st.subheader("📋 Liste des charges de la Salle Victoria")
+        
+        # Initialisation de l'état du filtre par date pour les dépenses
+        if 'filter_date_exp' not in pd_st.session_state:
+            pd_st.session_state.filter_date_exp = None
+            
+        col_sexp1, col_sexp2 = pd_st.columns(2)
+        with col_sexp1:
+            search_d_exp = pd_st.date_input("Filtrer l'historique par date", value=date.today())
+            if pd_st.button("🔍 Filtrer les Dépenses"):
+                pd_st.session_state.filter_date_exp = str(search_d_exp)
+        with col_sexp2:
+            pd_st.markdown("<br>", unsafe_allow_html=True)
+            if pd_st.button("🔄 Réinitialiser l'historique"):
+                pd_st.session_state.filter_date_exp = None
+                pd_st.rerun()
+                
+        # Extraction brute filtrée ou globale
+        if pd_st.session_state.filter_date_exp:
+            df_exp_list = query_db("SELECT id as 'ID', category as 'Catégorie', amount as 'Montant ($)', date_exp as 'Date Charge', desc as 'Bénéficiaire/Motif', status as 'État' FROM expenses WHERE date_exp = ? ORDER BY id DESC", (pd_st.session_state.filter_date_exp,))
+            pd_st.info(f"Filtre actif : Dépenses enregistrées le {pd_st.session_state.filter_date_exp}")
+        else:
+            df_exp_list = query_db("SELECT id as 'ID', category as 'Catégorie', amount as 'Montant ($)', date_exp as 'Date Charge', desc as 'Bénéficiaire/Motif', status as 'État' FROM expenses ORDER BY id DESC")
+            
+        if not df_exp_list.empty:
+            # Affichage de la table des dépenses
+            pd_st.dataframe(df_exp_list, use_container_width=True, hide_index=True)
+            
+            # --- EXTRACTION EXCEL DES DÉPENSES ---
+            buffer_exp = io.BytesIO()
+            with pd.ExcelWriter(buffer_exp, engine='openpyxl') as writer:
+                df_exp_list.to_excel(writer, index=False, sheet_name='Charges_Victoria')
+                
+            pd_st.download_button(
+                label="📥 Télécharger le journal des dépenses sous Excel (.xlsx)",
+                data=buffer_exp.getvalue(),
+                file_name=f"depenses_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            
+            # --- ACTIONS : MODIFIER / SUPPRIMER UNE DÉPENSE ---
+            pd_st.markdown("---")
+            pd_st.subheader("🛠️ Actions sur une note de dépense")
+            
+            # Création d'une description lisible par bénéficiaire et montant pour la liste déroulante
+            exp_options = {
+                f"ID {row['ID']} — {row['Bénéficiaire/Motif']} ({row['Montant ($)']} $)": row['ID']
+                for _, row in df_exp_list.iterrows()
+            }
+            
+            selected_exp_desc = pd_st.selectbox("Sélectionnez la ligne de dépense à traiter", list(exp_options.keys()))
+            selected_exp_id = exp_options[selected_exp_desc]
+            
+            # Charger les données actuelles de la dépense
+                        # Charger les données actuelles de la dépense de manière sécurisée (Bloc corrigé)
+            df_target_exp = query_db("SELECT * FROM expenses WHERE id = ?", (int(selected_exp_id),))
+            
+            if not df_target_exp.empty:
+                exp_data = df_target_exp.iloc[0] # Correction de l'indexation Pandas
+                
+                col_exp_act1, col_exp_act2 = pd_st.columns(2)
+                
+                with col_exp_act1:
+                    pd_st.markdown("**✏️ Formulaire de Modification de la Charge**")
+                    with pd_st.form(key=f"edit_exp_form_{selected_exp_id}"):
+                        categories_dispo = ["Énergie", "Entretien", "Fournitures", "Salaire", "Assurances", "Taxes", "Autres"]
+                        idx_cat = categories_dispo.index(exp_data['category']) if exp_data['category'] in categories_dispo else 0
+                        
+                        edit_cat = pd_st.selectbox("Modifier la Catégorie", categories_dispo, index=idx_cat)
+                        edit_amount = pd_st.number_input("Modifier le Montant ($)", min_value=0.0, value=float(exp_data['amount']))
+                        edit_desc = pd_st.text_input("Modifier le Motif", value=str(exp_data['desc']))
+                        edit_status = pd_st.selectbox("Modifier l'État", ["Payé", "En attente"], index=0 if exp_data['status'] == "Payé" else 1)
+                        
+                        submit_edit_exp = pd_st.form_submit_button("💾 Enregistrer les modifications de la charge")
+                        
+                        if submit_edit_exp:
+                            query_db("""UPDATE expenses SET category = ?, amount = ?, desc = ?, status = ? 
+                                        WHERE id = ?""", 
+                                     (edit_cat, edit_amount, edit_desc, edit_status, int(selected_exp_id)), is_select=False)
+                            pd_st.success("✅ La note de dépense a été mise à jour avec succès !")
+                            pd_st.rerun()
+                            
+                with col_exp_act2:
+                    pd_st.markdown("**❌ Zone de Suppression Définitive**")
+                    pd_st.warning(f"Vous allez supprimer définitivement la dépense liée à '{exp_data['desc']}' pour un montant de {exp_data['amount']} $. Cette action ajustera immédiatement le solde du Tableau de Bord.")
+                    if pd_st.button("🗑️ Supprimer définitivement cette dépense", use_container_width=True, key=f"del_exp_{selected_exp_id}"):
+                        query_db("DELETE FROM expenses WHERE id = ?", (int(selected_exp_id),), is_select=False)
+                        pd_st.success("🗑️ Note de dépense supprimée de la base de données !")
+                        pd_st.rerun()
+
+# --- 5. COMPTABILITÉ GÉNÉRALE & RAPPORTS CHRONOLOGIQUES ---
+elif menu == "Comptabilite et Rapports":
+    pd_st.title("🗄️ Grand Livre & Rapports Financiers")
+    pd_st.markdown("Analyse des flux de trésorerie, bilans intermédiaires et exports comptables.")
+    pd_st.markdown("<br>", unsafe_allow_html=True)
+    
+    # 1. Extraction brute des flux depuis la base de données
+    df_rec = query_db("SELECT date_pay as Date, 'Recette (Avance/Paiement Hall)' as Libellé, amount as Montant, 'Entrant' as Flux FROM receipts")
+    df_exp = query_db("SELECT date_exp as Date, category || ' — ' || desc as Libellé, amount as Montant, 'Sortant' as Flux FROM expenses")
+    
+    # Fusionner les deux tableaux pour créer le Grand Livre historique
+        # Fusionner les deux tableaux en réinitialisant les index proprement (Ligne corrigée)
+    grand_livre_global = pd.concat([df_rec, df_exp]).sort_values(by="Date", ascending=False).reset_index(drop=True)
+
+    
+    if grand_livre_global.empty:
+        pd_st.info("Aucun mouvement comptable (revenu ou dépense) trouvé dans le système.")
+    else:
+        # --- FILTRES DU RAPPORT ---
+        pd_st.subheader("📊 Générateur de Rapports")
+        type_rapport = pd_st.radio("Sélectionnez la période du rapport :", ["Journalier", "Mensuel", "Annuel", "Grand Livre Complet"], horizontal=True)
+        
+        aujourdhui = date.today()
+        df_rapport = grand_livre_global.copy()
+        titre_periode = "Global"
+        
+        if type_rapport == "Journalier":
+            choix_date = pd_st.date_input("Sélectionnez le jour à analyser :", value=aujourdhui)
+            df_rapport = df_rapport[df_rapport['Date'] == str(choix_date)]
+            titre_periode = f"du Jour {choix_date}"
+            
+        elif type_rapport == "Mensuel":
+            # Récupérer la liste des mois disponibles pour le filtre
+            mois_dispo = sorted(list(set(pd.to_datetime(grand_livre_global['Date']).dt.strftime('%Y-%m'))), reverse=True)
+            mois_actuel = aujourdhui.strftime('%Y-%m')
+            if mois_actuel not in mois_dispo:
+                mois_dispo.insert(0, mois_actuel)
+            choix_mois = pd_st.selectbox("Sélectionnez le mois :", mois_dispo, index=mois_dispo.index(mois_actuel))
+            df_rapport = df_rapport[pd.to_datetime(df_rapport['Date']).dt.strftime('%Y-%m') == choix_mois]
+            titre_periode = f"du Mois {choix_mois}"
+            
+        elif type_rapport == "Annuel":
+            annees_dispo = sorted(list(set(pd.to_datetime(grand_livre_global['Date']).dt.strftime('%Y'))), reverse=True)
+            annee_actuelle = aujourdhui.strftime('%Y')
+            if annee_actuelle not in annees_dispo:
+                annees_dispo.insert(0, annee_actuelle)
+            choix_annee = pd_st.selectbox("Sélectionnez l'année :", annees_dispo, index=annees_dispo.index(annee_actuelle))
+            df_rapport = df_rapport[pd.to_datetime(df_rapport['Date']).dt.strftime('%Y') == choix_annee]
+            titre_periode = f"de l'Année {choix_annee}"
+            
+        # --- AFFICHAGE DU COMPTE DE RÉSULTAT DU RAPPORT ---
+        pd_st.markdown("---")
+        pd_st.markdown(f"### 📋 Rapport Comptable {titre_periode}")
+        
+        # Séparer les flux entrants et sortants de la période sélectionnée
+        produits = df_rapport[df_rapport['Flux'] == 'Entrant']['Montant'].sum()
+        charges = df_rapport[df_rapport['Flux'] == 'Sortant']['Montant'].sum()
+        resultat_net = produits - charges
+        
+        # Affichage du bilan intermédiaire sous forme de colonnes épurées
+        col_b1, col_b2, col_b3 = pd_st.columns(3)
+        with col_b1:
+            pd_st.markdown(f"<div class='kpi-card kpi-revenue'><div class='kpi-title'>Total Recettes</div><div class='kpi-value'>{produits:,.2f} $</div></div>", unsafe_allow_html=True)
+        with col_b2:
+            pd_st.markdown(f"<div class='kpi-card kpi-expense'><div class='kpi-title'>Total Charges</div><div class='kpi-value'>{charges:,.2f} $</div></div>", unsafe_allow_html=True)
+        with col_b3:
+            if resultat_net >= 0:
+                pd_st.markdown(f"<div class='kpi-card kpi-solde'><div class='kpi-title'>Résultat Net (Bénéfice)</div><div class='kpi-value' style='color:{COLOR_REVENUE};'>{resultat_net:,.2f} $</div></div>", unsafe_allow_html=True)
+            else:
+                pd_st.markdown(f"<div class='kpi-card kpi-solde' style='border-left-color:{COLOR_EXPENSE};'><div class='kpi-title'>Résultat Net (Déficit)</div><div class='kpi-value' style='color:{COLOR_EXPENSE};'>{resultat_net:,.2f} $</div></div>", unsafe_allow_html=True)
+                
+        # --- TABLEAU ET EXPORTATION ---
+        if not df_rapport.empty:
+            pd_st.markdown("#### Journal des écritures sur la période")
+            
+            # Coloration conditionnelle des lignes (Vert pour les entrées, Rouge pour les sorties)
+            def colorer_lignes(row):
+                back_color = '#E8F5E9' if row['Flux'] == 'Entrant' else '#FFEBEE'
+                return [f'background-color: {back_color}'] * len(row)
+                
+            pd_st.dataframe(df_rapport.style.apply(colorer_lignes, axis=1).format({'Montant': '{:.2f} $'}), use_container_width=True, hide_index=True)
+            
+            # Génération du fichier Excel personnalisé
+            buffer_compta = io.BytesIO()
+            with pd.ExcelWriter(buffer_compta, engine='openpyxl') as writer:
+                df_rapport.to_excel(writer, index=False, sheet_name='Rapport_Victoria')
+                
+            pd_st.download_button(
+                label=f"📥 Exporter ce rapport {type_rapport.lower()} vers Excel (.xlsx)",
+                data=buffer_compta.getvalue(),
+                file_name=f"rapport_{type_rapport.lower()}_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        else:
+            pd_st.info(f"Aucun mouvement financier n'a été enregistré sur la période sélectionnée ({type_rapport.lower()}).")
