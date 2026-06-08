@@ -307,6 +307,7 @@ elif menu == "Reservations":
 # --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
 # --- 3. RECUS ET PAIEMENTS ---
 # --- 3. RECUS ET PAIEMENTS ---
+# --- 3. RECUS ET PAIEMENTS ---
 elif menu == "Recus et Paiements":
     pd_st.title("💵 Suivi des Avances & Paiements par Tranches")
     
@@ -338,8 +339,14 @@ elif menu == "Recus et Paiements":
     with tab_av2:
         pd_st.subheader("📜 Historique chronologique de toutes les tranches versées")
         
-        # Rechargement local pour avoir les IDs masqués nécessaires aux modifications
-        df_hist_raw = query_db("SELECT id, res_id, date_pay, amount, method, ref, notes FROM receipts ORDER BY date_pay DESC", (), is_select=True)
+        # Requête avec JOIN pour récupérer dynamiquement le nom du client et l'événement associé
+        query_jointure = """
+            SELECT r.id, res.client, res.event_name, r.date_pay, r.amount, r.method, r.ref, r.notes 
+            FROM receipts r
+            JOIN reservations res ON r.res_id = res.id
+            ORDER BY r.date_pay DESC
+        """
+        df_hist_raw = query_db(query_jointure, (), is_select=True)
         
         if not df_hist_raw.empty:
             # 1. BOUTON TÉLÉCHARGEMENT EXCEL
@@ -355,18 +362,17 @@ elif menu == "Recus et Paiements":
             )
             pd_st.markdown("---")
             
-            # 2. INTERFACE DE MODIFICATION ET SUPPRESSION EN DIRECT
-            pd_st.markdown("💡 *Double-cliquez sur une case pour modifier sa valeur. Cochez la case 'Supprimer' à droite puis validez pour effacer.*")
+            pd_st.markdown("💡 *Double-cliquez sur une case pour modifier sa valeur. Cochez 'Supprimer' à droite puis validez.*")
             
-            # On ajoute temporairement une colonne à cocher pour la suppression
             df_hist_raw["Supprimer"] = False
             
-            # Configuration des colonnes pour l'éditeur visuel
+            # 2. CONFIGURATION DE L'ÉDITEUR AVEC AFFICHAGE DU CLIENT ET ÉVÉNEMENT
             edited_df = pd_st.data_editor(
                 df_hist_raw,
                 column_config={
                     "id": pd_st.column_config.NumberColumn("N° Reçu", disabled=True),
-                    "res_id": pd_st.column_config.NumberColumn("ID Réservation", disabled=True),
+                    "client": pd_st.column_config.TextColumn("Nom du Client", disabled=True),
+                    "event_name": pd_st.column_config.TextColumn("Événement", disabled=True),
                     "date_pay": "Date de Paiement",
                     "amount": pd_st.column_config.NumberColumn("Montant Versé ($)"),
                     "method": pd_st.column_config.SelectboxColumn("Mode de Paiement", options=["Espèces", "Banque", "Mobile Money"]),
@@ -374,23 +380,18 @@ elif menu == "Recus et Paiements":
                     "notes": "Notes",
                     "Supprimer": pd_st.column_config.CheckboxColumn("Supprimer ?")
                 },
-                disabled=["id", "res_id"],
                 hide_index=True,
                 use_container_width=True,
                 key="editor_receipts"
             )
             
-            # Bouton de sauvegarde des modifications de l'historique
             if pd_st.button("💾 Enregistrer les changements (Modifications / Suppressions)"):
-                # Détection des suppressions
                 for index, row in edited_df.iterrows():
                     rec_id = int(row['id'])
                     
                     if row['Supprimer']:
-                        # Exécution de la suppression sur Supabase
                         query_db("DELETE FROM receipts WHERE id = %s", (rec_id,), is_select=False)
                     else:
-                        # Exécution de la mise à jour des données modifiées
                         query_db(
                             "UPDATE receipts SET date_pay = %s, amount = %s, method = %s, ref = %s, notes = %s WHERE id = %s",
                             (str(row['date_pay']), float(row['amount']), row['method'], row['ref'], row['notes'], rec_id),
@@ -400,6 +401,7 @@ elif menu == "Recus et Paiements":
                 pd_st.rerun()
         else:
             pd_st.info("Aucun versement enregistré.")
+
 
 
 # --- 4. GESTION ET SUIVI DES DÉPENSES ---
