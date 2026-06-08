@@ -266,10 +266,27 @@ elif menu == "Reservations":
             query = "SELECT id, client, date_event, event_name, status FROM reservations ORDER BY date_event DESC"
             df_filtre = query_db(query, (), is_select=True)
             
-        # Renommage propre des colonnes directement dans Python (et pas dans le SQL)
+        # Renommage propre des colonnes directement dans Python
         if not df_filtre.empty:
             df_filtre.columns = ["ID", "Client", "Date Événement", "Type d'Événement", "Statut"]
             pd_st.dataframe(df_filtre, use_container_width=True)
+            
+            # --- BLOC DE TÉLÉCHARGEMENT EXCEL (XLSX) ---
+            pd_st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Conversion du DataFrame en fichier Excel en mémoire (binaire)
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df_filtre.to_excel(writer, index=False, sheet_name='Réservations')
+            buffer.seek(0)
+            
+            # Création du bouton de téléchargement vert
+            pd_st.download_button(
+                label="📥 Télécharger la liste en Excel (.xlsx)",
+                data=buffer,
+                file_name=f"reservations_salle_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
         else:
             pd_st.info("Aucune réservation enregistrée.")
 
