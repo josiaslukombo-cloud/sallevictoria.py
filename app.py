@@ -123,23 +123,106 @@ df_res = query_db("SELECT * FROM reservations")
 df_rec = query_db("SELECT * FROM receipts")
 df_exp = query_db("SELECT * FROM expenses")
 
+# --- 1. TABLEAU DE BORD (AVEC FILTRE MENSUEL AUTOMATIQUE) ---
 if menu == "Tableau de Bord":
     pd_st.title("📊 Tableau de Bord")
-    total_rec = df_rec['amount'].sum() if not df_rec.empty else 0.0
-    total_exp = df_exp['amount'].sum() if not df_exp.empty else 0.0
-    solde = total_rec - total_exp
+    pd_st.markdown("Suivi des performances et de la rentabilité de la Salle Victoria.")
+    pd_st.markdown("<br>", unsafe_allow_html=True)
     
-    c1, c2, c3 = pd_st.columns(3)
-    with c1:
-        pd_st.markdown(f'<div class="kpi-card kpi-revenue"><div class="kpi-title">Recettes Totales</div><div class="kpi-value">{total_rec:,.2f} $</div></div>', unsafe_allow_html=True)
-    with c2:
-        pd_st.markdown(f'<div class="kpi-card kpi-expense"><div class="kpi-title">Dépenses Totales</div><div class="kpi-value">{total_exp:,.2f} $</div></div>', unsafe_allow_html=True)
-    with c3:
-        pd_st.markdown(f'<div class="kpi-card kpi-solde"><div class="kpi-title">Solde de Caisse</div><div class="kpi-value">{solde:,.2f} $</div></div>', unsafe_allow_html=True)
+    # Extraction brute de la base de données
+    df_res = query_db("SELECT * FROM reservations")
+    df_rec = query_db("SELECT * FROM receipts")
+    df_exp = query_db("SELECT * FROM expenses")
+    
+    # --- FILTRE PAR MOIS ---
+    pd_st.subheader("🔍 Période d'analyse")
+    
+    # Créer une liste unique de tous les mois disponibles dans le système (ex: 2026-06)
+    tous_les_mois = set()
+    if not df_rec.empty:
+        tous_les_mois.update(pd.to_datetime(df_rec['date_pay']).dt.strftime('%Y-%m').tolist())
+    if not df_exp.empty:
+        tous_les_mois.update(pd.to_datetime(df_exp['date_exp']).dt.strftime('%Y-%m').tolist())
+        
+    liste_mois = sorted(list(tous_les_mois), reverse=True)
+    mois_actuel = datetime.now().strftime('%Y-%m')
+    
+    # Ajouter le mois en cours par défaut s'il n'y a pas encore d'écriture
+    if mois_actuel not in liste_mois:
+        liste_mois.insert(0, mois_actuel)
+        
+    # Interface de filtrage
+    col_f1, col_f2 = pd_st.columns(2)
+    with col_f1:
+        mode_filtre = pd_st.radio("Choisir la vue :", ["Mois en cours / Sélectionné", "Historique Global (Toutes périodes)"], horizontal=True)
+    with col_f2:
+        selection_mois = pd_st.selectbox("Sélectionner le mois à analyser :", liste_mois, index=liste_mois.index(mois_actuel))
+        
+    # Application du filtre sur les données
+    if mode_filtre == "Mois en cours / Sélectionné":
+        pd_st.info(f"📅 Affichage des résultats pour le mois de : **{selection_mois}**")
+        if not df_rec.empty:
+            df_rec = df_rec[pd.to_datetime(df_rec['date_pay']).dt.strftime('%Y-%m') == selection_mois]
+        if not df_exp.empty:
+            df_exp = df_exp[pd.to_datetime(df_exp['date_exp']).dt.strftime('%Y-%m') == selection_mois]
+        if not df_res.empty:
+            df_res = df_res[pd.to_datetime(df_res['date_event']).dt.strftime('%Y-%m') == selection_mois]
+    else:
+        pd_st.info("🌍 Affichage de l'historique financier global (Cumul de tous les mois)")
 
-    if not df_res.empty:
-        fig = px.histogram(df_res, x="date_event", color="status", barmode="group", title="Réservations par Date")
+    # Calcul des indicateurs filtrés
+    total_rev = df_rec['amount'].sum() if not df_rec.empty else 0.0
+    total_exp = df_exp['amount'].sum() if not df_exp.empty else 0.0
+    solde = total_rev - total_exp
+    
+    # Affichage des Cartes KPI (Mises à jour selon le filtre)
+    pd_st.markdown("<br>", unsafe_allow_html=True)
+    col1, col2, col3, col4 = pd_st.columns(4)
+    with col1:
+        pd_st.markdown(f"<div class='kpi-card'><div class='kpi-title'>Réservations (Période)</div><div class='kpi-value'>{len(df_res)}</div></div>", unsafe_allow_html=True)
+    with col2:
+        pd_st.markdown(f"<div class='kpi-card kpi-revenue'><div class='kpi-title'>Revenus (Période)</div><div class='kpi-value'>{total_rev:,.2f} $</div></div>", unsafe_allow_html=True)
+    with col3:
+        pd_st.markdown(f"<div class='kpi-card kpi-expense'><div class='kpi-title'>Dépenses (Période)</div><div class='kpi-value'>{total_exp:,.2f} $</div></div>", unsafe_allow_html=True)
+    with col4:
+        pd_st.markdown(f"<div class='kpi-card kpi-solde'><div class='kpi-title'>Solde (Période)</div><div class='kpi-value'>{solde:,.2f} $</div></div>", unsafe_allow_html=True)
+    
+    # Section Graphique Évolution
+    pd_st.markdown("<br>", unsafe_allow_html=True)
+    pd_st.subheader("📈 Graphique Comparatif")
+    
+    # Recharger les données globales uniquement pour le graphique pour toujours voir la tendance
+    df_g_rec = query_db("SELECT * FROM receipts")
+    df_g_exp = query_db("SELECT * FROM expenses")
+    
+    if not df_g_rec.empty or not df_g_exp.empty:
+        if not df_g_rec.empty:
+            df_g_rec['mois'] = pd.to_datetime(df_g_rec['date_pay']).dt.strftime('%Y-%m')
+            rev_mensuel = df_g_rec.groupby('mois')['amount'].sum().reset_index().rename(columns={'amount': 'Revenus'})
+        else:
+            rev_mensuel = pd.DataFrame(columns=['mois', 'Revenus'])
+            
+        if not df_g_exp.empty:
+            df_g_exp['mois'] = pd.to_datetime(df_g_exp['date_exp']).dt.strftime('%Y-%m')
+            exp_mensuel = df_g_exp.groupby('mois')['amount'].sum().reset_index().rename(columns={'amount': 'Dépenses'})
+        else:
+            exp_mensuel = pd.DataFrame(columns=['mois', 'Dépenses'])
+            
+        df_fusion = pd.merge(rev_mensuel, exp_mensuel, on='mois', how='outer').fillna(0.0)
+        df_fusion = df_fusion.sort_values('mois')
+        df_fusion['Revenus'] = df_fusion['Revenus'].astype(float)
+        df_fusion['Dépenses'] = df_fusion['Dépenses'].astype(float)
+        
+        fig = px.bar(df_fusion, x='mois', y=['Revenus', 'Dépenses'], barmode='group',
+                     color_discrete_map={'Revenus': COLOR_REVENUE, 'Dépenses': COLOR_EXPENSE},
+                     template="simple_white",
+                     labels={'mois': 'Mois', 'value': 'Montant ($)', 'variable': 'Flux'})
+        
+        fig.update_layout(margin=dict(l=20, r=20, t=10, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         pd_st.plotly_chart(fig, use_container_width=True)
+    else:
+        pd_st.info("Aucune transaction enregistrée pour bâtir le graphique.")
+
 
 elif menu == "Reservations":
     pd_st.title("📅 Gestion des Réservations")
