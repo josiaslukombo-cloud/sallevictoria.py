@@ -317,7 +317,7 @@ elif menu == "Recus et Paiements":
             
             # --- CALCUL DU SUIVI DES AVANCES ---
             # Récupérer la somme de tous les versements déjà effectués pour cette réservation
-            df_deja_paye = query_db("SELECT SUM(amount) as total FROM receipts WHERE res_id = ?", (res_id,))
+            df_deja_paye = query_db("SELECT SUM(amount) as total FROM receipts WHERE res_id = %s", (res_id,))
             deja_paye = df_deja_paye['total'].iloc[0] if not df_deja_paye.empty and df_deja_paye['total'].iloc[0] is not None else 0.0
             
             # Formulaire d'encaissement de la nouvelle tranche
