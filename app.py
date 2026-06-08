@@ -5,6 +5,7 @@ import plotly.express as px
 import hashlib
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import io
 
 pd_st.set_page_config(page_title="Salle Victoria - Management", layout="wide", page_icon="🏢")
 
