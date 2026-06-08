@@ -12,8 +12,6 @@ def get_db_connection():
     # Connexion directe en utilisant l'URI de vos Secrets Streamlit
     return psycopg2.connect(pd_st.secrets["connection_uri"])
 
-    )
-
 def query_db(query, params=(), is_select=True):
     conn = get_db_connection()
     if is_select:
