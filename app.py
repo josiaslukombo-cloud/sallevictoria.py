@@ -306,6 +306,7 @@ elif menu == "Reservations":
 # --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
 # --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
 # --- 3. RECUS ET PAIEMENTS ---
+# --- 3. RECUS ET PAIEMENTS ---
 elif menu == "Recus et Paiements":
     pd_st.title("💵 Suivi des Avances & Paiements par Tranches")
     
@@ -351,47 +352,57 @@ elif menu == "Recus et Paiements":
             df_affiche.columns = ["N° Reçu", "Nom du Client", "Événement", "Date de Paiement", "Montant Versé ($)", "Mode de Paiement", "Référence", "Observations"]
             pd_st.dataframe(df_affiche, use_container_width=True, hide_index=True)
             
+            # --- BOUTON DE TÉLÉCHARGEMENT 1 : LES AVANCES PAYÉES ---
+            buffer_avances = io.BytesIO()
+            with pd.ExcelWriter(buffer_avances, engine='openpyxl') as writer:
+                df_affiche.to_excel(writer, index=False, sheet_name='Tranches_Avances')
+            buffer_avances.seek(0)
+            pd_st.download_button(
+                label="📥 Télécharger l'historique des Avances Payées (Excel)",
+                data=buffer_avances,
+                file_name=f"avances_payees_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
             # --- 2. POINT DE SITUATION GLOBAL PAR CLIENT ---
-            pd_st.markdown("<br>", unsafe_allow_html=True)
-            pd_st.subheader("📝 Point de situation global par Client")
+            pd_st.markdown("<br><hr>", unsafe_allow_html=True)
+            pd_st.subheader("📝 Point de situation global (Paiement Global par Client)")
             
             query_situation = """
-                SELECT res.client, res.event_name, COUNT(r.id) as nbr_tranches, SUM(r.amount) as total_verse
+                SELECT res.client, res.event_name, COUNT(r.id) as nbr_tranches, COALESCE(SUM(r.amount), 0) as total_verse
                 FROM reservations res
                 LEFT JOIN receipts r ON res.id = r.res_id
                 GROUP BY res.client, res.event_name
             """
             df_sit = query_db(query_situation, (), is_select=True)
             if not df_sit.empty:
-                df_sit.columns = ["Nom Client", "Événement", "Nombre de Tranches Versées", "Total Cumulé ($)"]
-                pd_st.dataframe(df_sit, use_container_width=True, hide_index=True)
+                df_sit_affiche = df_sit.copy()
+                df_sit_affiche.columns = ["Nom Client", "Événement", "Nombre de Tranches Versées", "Total Paiement Cumulé ($)"]
+                pd_st.dataframe(df_sit_affiche, use_container_width=True, hide_index=True)
                 
-                # Téléchargement Excel de la situation
-                buffer_rec = io.BytesIO()
-                with pd.ExcelWriter(buffer_rec, engine='openpyxl') as writer:
-                    df_sit.to_excel(writer, index=False, sheet_name='Situation_Clients')
-                buffer_rec.seek(0)
+                # --- BOUTON DE TÉLÉCHARGEMENT 2 : LE PAIEMENT GLOBAL ---
+                buffer_global = io.BytesIO()
+                with pd.ExcelWriter(buffer_global, engine='openpyxl') as writer:
+                    df_sit_affiche.to_excel(writer, index=False, sheet_name='Paiement_Global')
+                buffer_global.seek(0)
                 pd_st.download_button(
-                    label="📥 Télécharger le point de situation global (Excel)",
-                    data=buffer_rec,
-                    file_name=f"situation_paiements_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    label="📥 Télécharger le point de situation des Paiements Globaux (Excel)",
+                    data=buffer_global,
+                    file_name=f"paiement_global_clients_{datetime.now().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             
             # --- 3. ANNULER OU CORRIGER UNE TRANCHE SPÉCIFIQUE ---
-            pd_st.markdown("<br>", unsafe_allow_html=True)
+            pd_st.markdown("<br><hr>", unsafe_allow_html=True)
             pd_st.subheader("🛠️ Annuler ou corriger une tranche spécifique")
             
-            # Sélection du reçu à manipuler
             rec_options = {row['id']: f"Reçu N° {row['id']} - {row['client']} ({row['amount']} $)" for _, row in df_hist_raw.iterrows()}
             rec_id_sel = pd_st.selectbox("Sélectionnez le numéro du reçu à modifier ou supprimer :", options=list(rec_options.keys()), format_func=lambda x: rec_options[x])
             
-            # Récupération des infos actuelles du reçu sélectionné
             row_sel = df_hist_raw[df_hist_raw['id'] == rec_id_sel].iloc[0]
             
             col_actions_1, col_actions_2 = pd_st.columns(2)
             
-            # Formulaire de modification (Colonne Gauche)
             with col_actions_1:
                 pd_st.markdown("##### 📝 Modifier cette tranche")
                 with pd_st.form("form_modif_rec"):
@@ -407,7 +418,6 @@ elif menu == "Recus et Paiements":
                             pd_st.success("Tranche mise à jour avec succès !")
                             pd_st.rerun()
             
-            # Formulaire de suppression sécurisé (Colonne Droite)
             with col_actions_2:
                 pd_st.markdown("##### ❌ Supprimer cette tranche")
                 pd_st.warning(f"Pour effacer définitivement le versement de {row_sel['amount']} $ fait par le client {row_sel['client']}, cliquez ci-dessous :")
@@ -419,6 +429,7 @@ elif menu == "Recus et Paiements":
                         pd_st.rerun()
         else:
             pd_st.info("Aucun versement enregistré.")
+
 
 # --- 4. GESTION ET SUIVI DES DÉPENSES ---
 elif menu == "Gestion des Depenses":
