@@ -307,157 +307,59 @@ else:
 
 # --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
 # --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
+# --- 3. RECUS ET PAIEMENTS ---
 elif menu == "Recus et Paiements":
     pd_st.title("💵 Suivi des Avances & Paiements par Tranches")
     
-    tab_pay1, tab_pay2 = pd_st.tabs(["✨ Enregistrer une Avance / Paiement", "🔍 Historique complet des Versements"])
+    tab_av1, tab_av2 = pd_st.tabs(["➕ Enregistrer une Avance / Paiement", "📜 Historique complet des Versements"])
     
-    # Récupérer toutes les réservations
-    df_res = query_db("SELECT id, client, event_name FROM reservations")
-    
-    with tab_pay1:
+    with tab_av1:
         if df_res.empty:
-            pd_st.warning("⚠️ Aucune réservation trouvée. Veuillez d'abord ajouter une réservation.")
+            pd_st.warning("Vous devez créer au moins une réservation pour pouvoir enregistrer un versement.")
         else:
-            # Sélection du client par Nom + Événement
-            res_options = {
-                f"{row['client']} — {row['event_name']} (ID {row['id']})": row['id'] 
-                for _, row in df_res.iterrows()
-            }
+            # Récupération du total déjà versé pour le client sélectionné
+            res_options = {row['id']: f"{row['client']} — {row['event_name']} (ID {row['id']})" for _, row in df_res.iterrows()}
+            res_id_sel = pd_st.selectbox("Sélectionner la réservation du client :", options=list(res_options.keys()), format_func=lambda x: res_options[x])
             
-            selected_res = pd_st.selectbox("Sélectionner la réservation du client :", list(res_options.keys()))
-            res_id = res_options[selected_res]
+            # Requête corrigée avec %s pour Supabase
+            df_total_verse = query_db("SELECT SUM(amount) as total FROM receipts WHERE res_id = %s", (int(res_id_sel),), is_select=True)
+            deja_verse = float(df_total_verse['total'].iloc[0]) if not df_total_verse.empty and pd.notna(df_total_verse['total'].iloc[0]) else 0.0
             
-            # --- CALCUL DU SUIVI DES AVANCES ---
-            # Récupérer la somme de tous les versements déjà effectués pour cette réservation
-            df_deja_paye = query_db("SELECT SUM(amount) as total FROM receipts WHERE res_id = %s", (res_id,))
-            deja_paye = df_deja_paye['total'].iloc[0] if not df_deja_paye.empty and df_deja_paye['total'].iloc[0] is not None else 0.0
+            pd_st.markdown(f"#### 📊 État actuel pour ce client : *Déjà versé au total : {deja_verse:,.2f} $*")
             
-            # Formulaire d'encaissement de la nouvelle tranche
-            pd_st.markdown("---")
-            pd_st.markdown(f"📊 **État actuel pour ce client :** Déjà versé au total : `{deja_paye:,.2f} $`")
-            
-            form_pay = pd_st.form(key="form_enregistrement_avance", clear_on_submit=True)
-            form_pay.markdown("### Enregistrer un nouveau versement (Avance)")
-            date_pay = form_pay.date_input("Date du versement", value=date.today())
-            amount = form_pay.number_input("Montant de cette avance ($)", min_value=0.0, step=50.0)
-            method = form_pay.selectbox("Mode de paiement", ["Espèces", "Virement", "Chèque", "Mobile Money"])
-            ref = form_pay.text_input("Référence de la transaction (N° reçu, N° transfert...)")
-            notes = form_pay.text_area("Note (ex: 'Deuxième avance', 'Solde final'...)")
-            submit_pay = form_pay.form_submit_button("🔒 Valider et Émettre le reçu pour cette tranche")
-            
-            if submit_pay:
-                if amount > 0:
-                    # Insérer le versement comme une nouvelle ligne (historique des tranches)
-                    query_db("""INSERT INTO receipts (res_id, date_pay, amount, method, ref, notes) 
-                                VALUES (?, ?, ?, ?, ?, ?)""",
-                             (res_id, str(date_pay), amount, method, ref, notes), is_select=False)
-                    
-                    # Mettre automatiquement à jour le statut global de la réservation sur "Payé" 
-                    query_db("UPDATE reservations SET status = 'Payé' WHERE id = %s", (res_id,), is_select=False)
-                    
-                    pd_st.success(f"✅ Avance de {amount:,.2f} $ enregistrée ! Nouveau total versé : {(deja_paye + amount):,.2f} $")
-                    pd_st.rerun()
-                else:
-                    form_pay.error("❌ Le montant doit être supérieur à 0 $.")
-                    
-    with tab_pay2:
-        pd_st.subheader("📋 Historique chronologique de toutes les tranches versées")
-        
-        # Journal d'affichage complet de chaque ticket de paiement émis
-        df_receipts_all = query_db("""
-            SELECT r.id as 'N° Reçu', res.id as 'ID Res', res.client as 'Nom Client', res.event_name as 'Type Événement', 
-            r.date_pay as 'Date Versement', r.amount as 'Montant Versé ($)', r.method as 'Mode Réglement', r.notes as 'Détails Tranche'
-            FROM receipts r JOIN reservations res ON r.res_id = res.id ORDER BY r.id DESC
-        """)
-        
-        if not df_receipts_all.empty:
-            # Afficher chaque versement individuel
-            pd_st.dataframe(df_receipts_all.drop(columns=['ID Res']), use_container_width=True, hide_index=True)
-            
-            # --- SYNTHÈSE PAR CLIENT (Suivi du cumul de ses acomptes) ---
-            pd_st.markdown("---")
-            pd_st.subheader("📈 Point de situation global par Client")
-            
-            # Calculer la somme totale versée par chaque client pour sa réservation
-            df_synthese_clients = query_db("""
-                SELECT res.client as 'Nom Client', res.event_name as 'Événement', 
-                COUNT(r.id) as 'Nombre de Versements', SUM(r.amount) as 'Total Cumulé ($)'
-                FROM reservations res 
-                LEFT JOIN receipts r ON res.id = r.res_id 
-                GROUP BY res.id
-            """)
-            pd_st.dataframe(df_synthese_clients, use_container_width=True, hide_index=True)
-            
-            # Bouton d'export Excel de tout l'historique des paiements
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_receipts_all.drop(columns=['ID Res']).to_excel(writer, index=False, sheet_name='Suivi_Avances_Victoria')
-            
-            pd_st.download_button(
-                label="📥 Télécharger le grand livre des avances sous Excel (.xlsx)",
-                data=buffer.getvalue(),
-                file_name=f"suivi_avances_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-            # --- ACTIONS : MODIFIER / SUPPRIMER UNE AVANCE ---
-            pd_st.markdown("---")
-            pd_st.subheader("🛠️ Annuler ou corriger une tranche spécifique")
-            
-            receipt_options = {
-                f"Reçu N° {row['N° Reçu']} — {row['Nom Client']} ({row['Montant Versé ($)']} $)": row['N° Reçu']
-                for _, row in df_receipts_all.iterrows()
-            }
-            
-            selected_receipt_desc = pd_st.selectbox("Sélectionnez le ticket de versement à modifier/supprimer", list(receipt_options.keys()))
-            selected_receipt_id = receipt_options[selected_receipt_desc]
-            
-                        # Charger les données actuelles du reçu de manière sécurisée (Ligne corrigée)
-            df_target = query_db("SELECT * FROM receipts WHERE id = ?", (int(selected_receipt_id),))
-            
-            if not df_target.empty:
-                # Extraction propre de la première ligne du tableau
-                rec_data = df_target.iloc[0]
+            with pd_st.form("form_rec_tranche"):
+                pd_st.subheader("Enregistrer un nouveau versement (Avance)")
+                date_pay = pd_st.date_input("Date du versement", date.today())
+                amount = pd_st.number_input("Montant de cette avance ($)", min_value=0.0, step=50.0)
+                method = pd_st.selectbox("Mode de paiement", ["Espèces", "Banque", "Mobile Money"])
+                ref = pd_st.text_input("Référence de la transaction (N° reçu, N° transfert...)")
+                notes = pd_st.text_area("Note (ex: 'Deuxième avance', 'Solde final'...)")
+                submit = pd_st.form_submit_button("🔒 Valider et Émettre le reçu pour cette tranche")
                 
-                col_rec_act1, col_rec_act2 = pd_st.columns(2)
-                
-                with col_rec_act1:
-                    pd_st.markdown("**✏️ Modifier cette tranche**")
-                    with pd_st.form(key=f"edit_receipt_form_{selected_receipt_id}"):
-                        edit_amount = pd_st.number_input("Corriger le Montant de cette tranche ($)", min_value=0.0, value=float(rec_data['amount']))
-                        
-                        # Gestion sécurisée de l'index du mode de paiement
-                        modes_dispo = ["Espèces", "Virement", "Chèque", "Mobile Money"]
-                        mode_actuel = rec_data['method'] if rec_data['method'] in modes_dispo else "Espèces"
-                        index_defaut = modes_dispo.index(mode_actuel)
-                        
-                        edit_method = pd_st.selectbox("Mode de versement", modes_dispo, index=index_defaut)
-                        edit_ref = pd_st.text_input("Référence de transaction", value=str(rec_data['ref']))
-                        edit_notes = pd_st.text_area("Observations", value=str(rec_data['notes']))
-                        submit_edit_rec = pd_st.form_submit_button("💾 Enregistrer les corrections")
-                        
-                        if submit_edit_rec:
-                            query_db("""UPDATE receipts SET amount = ?, method = ?, ref = ?, notes = ? 
-                                        WHERE id = ?""", 
-                                     (edit_amount, edit_method, edit_ref, edit_notes, int(selected_receipt_id)), is_select=False)
-                            pd_st.success("✅ La tranche de paiement a été corrigée !")
-                            pd_st.rerun()
-                            
-                with col_rec_act2:
-                    pd_st.markdown("**❌ Supprimer cette tranche**")
-                    pd_st.warning(f"Vous allez supprimer définitivement le versement de {rec_data['amount']} $. Le total payé par le client diminuera.")
-                    if pd_st.button("🗑️ Supprimer ce versement", use_container_width=True, key=f"del_rec_{selected_receipt_id}"):
-                        linked_res_id = int(rec_data['res_id'])
-                        query_db("DELETE FROM receipts WHERE id = ?", (int(selected_receipt_id),), is_select=False)
-                        
-                        # Si plus aucun versement n'existe pour cette réservation, elle redevient "Non payé"
-                        remains = query_db("SELECT id FROM receipts WHERE res_id = ?", (linked_res_id,))
-                        if remains.empty:
-                            query_db("UPDATE reservations SET status = 'Non payé' WHERE id = ?", (linked_res_id,), is_select=False)
-                            
-                        pd_st.success("🗑️ Versement supprimé et calculs mis à jour !")
+                if submit and amount > 0:
+                    if query_db("INSERT INTO receipts (res_id, date_pay, amount, method, ref, notes) VALUES (%s, %s, %s, %s, %s, %s)", 
+                                (int(res_id_sel), str(date_pay), float(amount), method, ref, notes), is_select=False):
+                        pd_st.success("Versement enregistré avec succès !")
                         pd_st.rerun()
+
+    with tab_av2:
+        pd_st.subheader("📜 Historique chronologique de toutes les tranches versées")
+        
+        # Requête SQL propre sans alias buggés pour Supabase
+        query_hist = """
+            SELECT r.id, r.res_id, r.date_pay, r.amount, r.method, r.ref, r.notes 
+            FROM receipts r 
+            ORDER BY r.date_pay DESC
+        """
+        df_hist = query_db(query_hist, (), is_select=True)
+        
+        # Affichage et renommage propre via Python
+        if not df_hist.empty:
+            df_hist.columns = ["N° Reçu", "ID Réservation", "Date de Paiement", "Montant Versé ($)", "Mode de Paiement", "Référence", "Notes"]
+            pd_st.dataframe(df_hist, use_container_width=True)
+        else:
+            pd_st.info("Aucun versement n'a encore été enregistré.")
+
 # --- 4. GESTION ET SUIVI DES DÉPENSES ---
 elif menu == "Gestion des Depenses":
     pd_st.title("📉 Contrôle & Suivi des Dépenses")
