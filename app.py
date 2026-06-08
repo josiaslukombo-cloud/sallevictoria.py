@@ -305,10 +305,11 @@ elif menu == "Reservations":
 
 # --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
 # --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
+# --- 3. RECUS ET PAIEMENTS ---
 elif menu == "Recus et Paiements":
     pd_st.title("💵 Suivi des Avances & Paiements par Tranches")
     
-    tab_av1, tab_av2 = pd_st.tabs(["➕ Enregistrer une Avance / Paiement", "📜 Historique complet des Versements"])
+    tab_av1, tab_av2 = pd_st.tabs(["➕ Enregistrer une Avance / Paiement", "📜 Historique & Gestion des Versements"])
     
     with tab_av1:
         if df_res.empty:
@@ -334,9 +335,9 @@ elif menu == "Recus et Paiements":
                         pd_st.rerun()
 
     with tab_av2:
+        # --- 1. HISTORIQUE CHRONOLOGIQUE DES TOUTES LES TRANCHES VERSÉES ---
         pd_st.subheader("📜 Historique chronologique de toutes les tranches versées")
         
-        # Requête avec JOIN pour récupérer dynamiquement le nom du client et l'événement associé
         query_jointure = """
             SELECT r.id, res.client, res.event_name, r.date_pay, r.amount, r.method, r.ref, r.notes 
             FROM receipts r
@@ -346,61 +347,78 @@ elif menu == "Recus et Paiements":
         df_hist_raw = query_db(query_jointure, (), is_select=True)
         
         if not df_hist_raw.empty:
-            # 1. BOUTON TÉLÉCHARGEMENT EXCEL
-            buffer_rec = io.BytesIO()
-            with pd.ExcelWriter(buffer_rec, engine='openpyxl') as writer:
-                df_hist_raw.to_excel(writer, index=False, sheet_name='Versements')
-            buffer_rec.seek(0)
-            pd_st.download_button(
-                label="📥 Télécharger l'historique en Excel (.xlsx)",
-                data=buffer_rec,
-                file_name=f"versements_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            pd_st.markdown("---")
+            df_affiche = df_hist_raw.copy()
+            df_affiche.columns = ["N° Reçu", "Nom du Client", "Événement", "Date de Paiement", "Montant Versé ($)", "Mode de Paiement", "Référence", "Observations"]
+            pd_st.dataframe(df_affiche, use_container_width=True, hide_index=True)
             
-            pd_st.markdown("💡 *Double-cliquez sur une case pour modifier sa valeur. Cochez 'Supprimer' à droite puis validez.*")
+            # --- 2. POINT DE SITUATION GLOBAL PAR CLIENT ---
+            pd_st.markdown("<br>", unsafe_allow_html=True)
+            pd_st.subheader("📝 Point de situation global par Client")
             
-            df_hist_raw["Supprimer"] = False
+            query_situation = """
+                SELECT res.client, res.event_name, COUNT(r.id) as nbr_tranches, SUM(r.amount) as total_verse
+                FROM reservations res
+                LEFT JOIN receipts r ON res.id = r.res_id
+                GROUP BY res.client, res.event_name
+            """
+            df_sit = query_db(query_situation, (), is_select=True)
+            if not df_sit.empty:
+                df_sit.columns = ["Nom Client", "Événement", "Nombre de Tranches Versées", "Total Cumulé ($)"]
+                pd_st.dataframe(df_sit, use_container_width=True, hide_index=True)
+                
+                # Téléchargement Excel de la situation
+                buffer_rec = io.BytesIO()
+                with pd.ExcelWriter(buffer_rec, engine='openpyxl') as writer:
+                    df_sit.to_excel(writer, index=False, sheet_name='Situation_Clients')
+                buffer_rec.seek(0)
+                pd_st.download_button(
+                    label="📥 Télécharger le point de situation global (Excel)",
+                    data=buffer_rec,
+                    file_name=f"situation_paiements_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
             
-            # 2. CONFIGURATION DE L'ÉDITEUR AVEC AFFICHAGE DU CLIENT ET ÉVÉNEMENT
-                       # 2. CONFIGURATION DE L'ÉDITEUR AVEC DEBLOCAGE DE LA SAISIE (disabled=False)
-            edited_df = pd_st.data_editor(
-                df_hist_raw,
-                column_config={
-                    "id": pd_st.column_config.NumberColumn("N° Reçu", disabled=True),
-                    "client": pd_st.column_config.TextColumn("Nom du Client", disabled=True),
-                    "event_name": pd_st.column_config.TextColumn("Événement", disabled=True),
-                    "date_pay": pd_st.column_config.TextColumn("Date de Paiement", disabled=False),
-                    "amount": pd_st.column_config.NumberColumn("Montant Versé ($)", disabled=False),
-                    "method": pd_st.column_config.SelectboxColumn("Mode de Paiement", options=["Espèces", "Banque", "Mobile Money"], disabled=False),
-                    "ref": pd_st.column_config.TextColumn("Référence", disabled=False),
-                    "notes": pd_st.column_config.TextColumn("Notes", disabled=False),
-                    "Supprimer": pd_st.column_config.CheckboxColumn("Supprimer ?", disabled=False)
-                },
-                hide_index=True,
-                use_container_width=True,
-                key="editor_receipts"
-            )
-
-            if pd_st.button("💾 Enregistrer les changements (Modifications / Suppressions)"):
-                for index, row in edited_df.iterrows():
-                    rec_id = int(row['id'])
+            # --- 3. ANNULER OU CORRIGER UNE TRANCHE SPÉCIFIQUE ---
+            pd_st.markdown("<br>", unsafe_allow_html=True)
+            pd_st.subheader("🛠️ Annuler ou corriger une tranche spécifique")
+            
+            # Sélection du reçu à manipuler
+            rec_options = {row['id']: f"Reçu N° {row['id']} - {row['client']} ({row['amount']} $)" for _, row in df_hist_raw.iterrows()}
+            rec_id_sel = pd_st.selectbox("Sélectionnez le numéro du reçu à modifier ou supprimer :", options=list(rec_options.keys()), format_func=lambda x: rec_options[x])
+            
+            # Récupération des infos actuelles du reçu sélectionné
+            row_sel = df_hist_raw[df_hist_raw['id'] == rec_id_sel].iloc[0]
+            
+            col_actions_1, col_actions_2 = pd_st.columns(2)
+            
+            # Formulaire de modification (Colonne Gauche)
+            with col_actions_1:
+                pd_st.markdown("##### 📝 Modifier cette tranche")
+                with pd_st.form("form_modif_rec"):
+                    new_amount = pd_st.number_input("Corriger le montant ($)", min_value=0.0, value=float(row_sel['amount']))
+                    new_method = pd_st.selectbox("Mode de paiement", ["Espèces", "Banque", "Mobile Money"], index=["Espèces", "Banque", "Mobile Money"].index(row_sel['method']) if row_sel['method'] in ["Espèces", "Banque", "Mobile Money"] else 0)
+                    new_ref = pd_st.text_input("Référence de transaction", value=str(row_sel['ref']))
+                    new_notes = pd_st.text_area("Observations", value=str(row_sel['notes']))
+                    btn_save_modif = pd_st.form_submit_button("💾 Enregistrer les corrections")
                     
-                    if row['Supprimer']:
-                        query_db("DELETE FROM receipts WHERE id = %s", (rec_id,), is_select=False)
-                    else:
-                        query_db(
-                            "UPDATE receipts SET date_pay = %s, amount = %s, method = %s, ref = %s, notes = %s WHERE id = %s",
-                            (str(row['date_pay']), float(row['amount']), row['method'], row['ref'], row['notes'], rec_id),
-                            is_select=False
-                        )
-                pd_st.success("Base de données mise à jour avec succès !")
-                pd_st.rerun()
+                    if btn_save_modif:
+                        if query_db("UPDATE receipts SET amount = %s, method = %s, ref = %s, notes = %s WHERE id = %s", 
+                                    (new_amount, new_method, new_ref, new_notes, int(rec_id_sel)), is_select=False):
+                            pd_st.success("Tranche mise à jour avec succès !")
+                            pd_st.rerun()
+            
+            # Formulaire de suppression sécurisé (Colonne Droite)
+            with col_actions_2:
+                pd_st.markdown("##### ❌ Supprimer cette tranche")
+                pd_st.warning(f"Pour effacer définitivement le versement de {row_sel['amount']} $ fait par le client {row_sel['client']}, cliquez ci-dessous :")
+                btn_delete_rec = pd_st.button("🗑️ Supprimer définitivement ce versement", use_container_width=True)
+                
+                if btn_delete_rec:
+                    if query_db("DELETE FROM receipts WHERE id = %s", (int(rec_id_sel),), is_select=False):
+                        pd_st.success("Le versement a été supprimé de la base de données !")
+                        pd_st.rerun()
         else:
             pd_st.info("Aucun versement enregistré.")
-
-
 
 # --- 4. GESTION ET SUIVI DES DÉPENSES ---
 elif menu == "Gestion des Depenses":
