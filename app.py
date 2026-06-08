@@ -306,6 +306,7 @@ elif menu == "Reservations":
 # --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
 # --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
 # --- 3. RECUS ET PAIEMENTS ---
+# --- 3. RECUS ET PAIEMENTS ---
 elif menu == "Recus et Paiements":
     pd_st.title("💵 Suivi des Avances & Paiements par Tranches")
     
@@ -313,50 +314,93 @@ elif menu == "Recus et Paiements":
     
     with tab_av1:
         if df_res.empty:
-            pd_st.warning("Vous devez créer au moins une réservation pour pouvoir enregistrer un versement.")
+            pd_st.warning("Vous devez créer au moins une réservation pour enregistrer un versement.")
         else:
-            # Récupération du total déjà versé pour le client sélectionné
             res_options = {row['id']: f"{row['client']} — {row['event_name']} (ID {row['id']})" for _, row in df_res.iterrows()}
             res_id_sel = pd_st.selectbox("Sélectionner la réservation du client :", options=list(res_options.keys()), format_func=lambda x: res_options[x])
             
-            # Requête corrigée avec %s pour Supabase
             df_total_verse = query_db("SELECT SUM(amount) as total FROM receipts WHERE res_id = %s", (int(res_id_sel),), is_select=True)
             deja_verse = float(df_total_verse['total'].iloc[0]) if not df_total_verse.empty and pd.notna(df_total_verse['total'].iloc[0]) else 0.0
-            
             pd_st.markdown(f"#### 📊 État actuel pour ce client : *Déjà versé au total : {deja_verse:,.2f} $*")
             
             with pd_st.form("form_rec_tranche"):
-                pd_st.subheader("Enregistrer un nouveau versement (Avance)")
                 date_pay = pd_st.date_input("Date du versement", date.today())
                 amount = pd_st.number_input("Montant de cette avance ($)", min_value=0.0, step=50.0)
                 method = pd_st.selectbox("Mode de paiement", ["Espèces", "Banque", "Mobile Money"])
-                ref = pd_st.text_input("Référence de la transaction (N° reçu, N° transfert...)")
-                notes = pd_st.text_area("Note (ex: 'Deuxième avance', 'Solde final'...)")
-                submit = pd_st.form_submit_button("🔒 Valider et Émettre le reçu pour cette tranche")
-                
+                ref = pd_st.text_input("Référence de la transaction")
+                notes = pd_st.text_area("Note")
+                submit = pd_st.form_submit_button("🔒 Valider le reçu")
                 if submit and amount > 0:
-                    if query_db("INSERT INTO receipts (res_id, date_pay, amount, method, ref, notes) VALUES (%s, %s, %s, %s, %s, %s)", 
-                                (int(res_id_sel), str(date_pay), float(amount), method, ref, notes), is_select=False):
-                        pd_st.success("Versement enregistré avec succès !")
+                    if query_db("INSERT INTO receipts (res_id, date_pay, amount, method, ref, notes) VALUES (%s, %s, %s, %s, %s, %s)", (int(res_id_sel), str(date_pay), float(amount), method, ref, notes), is_select=False):
+                        pd_st.success("Versement enregistré !")
                         pd_st.rerun()
 
     with tab_av2:
         pd_st.subheader("📜 Historique chronologique de toutes les tranches versées")
         
-        # Requête SQL propre sans alias buggés pour Supabase
-        query_hist = """
-            SELECT r.id, r.res_id, r.date_pay, r.amount, r.method, r.ref, r.notes 
-            FROM receipts r 
-            ORDER BY r.date_pay DESC
-        """
-        df_hist = query_db(query_hist, (), is_select=True)
+        # Rechargement local pour avoir les IDs masqués nécessaires aux modifications
+        df_hist_raw = query_db("SELECT id, res_id, date_pay, amount, method, ref, notes FROM receipts ORDER BY date_pay DESC", (), is_select=True)
         
-        # Affichage et renommage propre via Python
-        if not df_hist.empty:
-            df_hist.columns = ["N° Reçu", "ID Réservation", "Date de Paiement", "Montant Versé ($)", "Mode de Paiement", "Référence", "Notes"]
-            pd_st.dataframe(df_hist, use_container_width=True)
+        if not df_hist_raw.empty:
+            # 1. BOUTON TÉLÉCHARGEMENT EXCEL
+            buffer_rec = io.BytesIO()
+            with pd.ExcelWriter(buffer_rec, engine='openpyxl') as writer:
+                df_hist_raw.to_excel(writer, index=False, sheet_name='Versements')
+            buffer_rec.seek(0)
+            pd_st.download_button(
+                label="📥 Télécharger l'historique en Excel (.xlsx)",
+                data=buffer_rec,
+                file_name=f"versements_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            pd_st.markdown("---")
+            
+            # 2. INTERFACE DE MODIFICATION ET SUPPRESSION EN DIRECT
+            pd_st.markdown("💡 *Double-cliquez sur une case pour modifier sa valeur. Cochez la case 'Supprimer' à droite puis validez pour effacer.*")
+            
+            # On ajoute temporairement une colonne à cocher pour la suppression
+            df_hist_raw["Supprimer"] = False
+            
+            # Configuration des colonnes pour l'éditeur visuel
+            edited_df = pd_st.data_editor(
+                df_hist_raw,
+                column_config={
+                    "id": pd_st.column_config.NumberColumn("N° Reçu", disabled=True),
+                    "res_id": pd_st.column_config.NumberColumn("ID Réservation", disabled=True),
+                    "date_pay": "Date de Paiement",
+                    "amount": pd_st.column_config.NumberColumn("Montant Versé ($)"),
+                    "method": pd_st.column_config.SelectboxColumn("Mode de Paiement", options=["Espèces", "Banque", "Mobile Money"]),
+                    "ref": "Référence",
+                    "notes": "Notes",
+                    "Supprimer": pd_st.column_config.CheckboxColumn("Supprimer ?")
+                },
+                disabled=["id", "res_id"],
+                hide_index=True,
+                use_container_width=True,
+                key="editor_receipts"
+            )
+            
+            # Bouton de sauvegarde des modifications de l'historique
+            if pd_st.button("💾 Enregistrer les changements (Modifications / Suppressions)"):
+                # Détection des suppressions
+                for index, row in edited_df.iterrows():
+                    rec_id = int(row['id'])
+                    
+                    if row['Supprimer']:
+                        # Exécution de la suppression sur Supabase
+                        query_db("DELETE FROM receipts WHERE id = %s", (rec_id,), is_select=False)
+                    else:
+                        # Exécution de la mise à jour des données modifiées
+                        query_db(
+                            "UPDATE receipts SET date_pay = %s, amount = %s, method = %s, ref = %s, notes = %s WHERE id = %s",
+                            (str(row['date_pay']), float(row['amount']), row['method'], row['ref'], row['notes'], rec_id),
+                            is_select=False
+                        )
+                pd_st.success("Base de données mise à jour avec succès !")
+                pd_st.rerun()
         else:
-            pd_st.info("Aucun versement n'a encore été enregistré.")
+            pd_st.info("Aucun versement enregistré.")
+
 
 # --- 4. GESTION ET SUIVI DES DÉPENSES ---
 elif menu == "Gestion des Depenses":
