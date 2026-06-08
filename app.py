@@ -361,10 +361,10 @@ elif menu == "Recus et Paiements":
             pd_st.info("Aucun versement n'a encore été enregistré.")
 
 # --- 4. GESTION ET SUIVI DES DÉPENSES ---
-elif menu == "Gestion des Depenses":
-    pd_st.title("📉 Contrôle & Suivi des Dépenses")
+    elif menu == "Gestion des Depenses":
+        pd_st.title("📉 Contrôle & Suivi des Dépenses")
     
-    tab_exp1, tab_exp2 = pd_st.tabs(["✨ Enregistrer une Dépense", "🔍 Historique, Actions & Export"])
+        tab_exp1, tab_exp2 = pd_st.tabs(["✨ Enregistrer une Dépense", "🔍 Historique, Actions & Export"])
     
     with tab_exp1:
         # Formulaire d'insertion robuste rattaché à son objet formulaire
