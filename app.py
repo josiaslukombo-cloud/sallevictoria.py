@@ -341,7 +341,7 @@ elif menu == "Recus et Paiements":
                              (res_id, str(date_pay), amount, method, ref, notes), is_select=False)
                     
                     # Mettre automatiquement à jour le statut global de la réservation sur "Payé" 
-                    query_db("UPDATE reservations SET status = 'Payé' WHERE id = ?", (res_id,), is_select=False)
+                    query_db("UPDATE reservations SET status = 'Payé' WHERE id = %s", (res_id,), is_select=False)
                     
                     pd_st.success(f"✅ Avance de {amount:,.2f} $ enregistrée ! Nouveau total versé : {(deja_paye + amount):,.2f} $")
                     pd_st.rerun()
