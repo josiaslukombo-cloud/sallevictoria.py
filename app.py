@@ -225,129 +225,54 @@ if menu == "Tableau de Bord":
 
 
 # --- 2. GESTION DES RÉSERVATIONS (AVEC STATUT CHRONOLOGIQUE) ---
+# --- 2. RESERVATIONS ---
 elif menu == "Reservations":
     pd_st.title("📅 Gestion des Réservations")
-    tab1, tab2 = pd_st.tabs(["✨ Nouvelle Réservation", "🔍 Liste & Disponibilités"])
+    
+    # Création des deux sous-onglets pour correspondre à votre design visuel
+    tab1, tab2 = pd_st.tabs(["🚀 Nouvelle Réservation", "🔍 Liste & Disponibilités"])
     
     with tab1:
-        form_res = pd_st.form(key="my_form_reservation", clear_on_submit=True)
-        client = form_res.text_input("Nom Complet du Client")
-        date_ev = form_res.date_input("Date de l'événement", min_value=date.today())
-        event_name = form_res.text_input("Nom / Nature de l'événement")
-        status = form_res.selectbox("Statut Initial du Paiement", ["Non payé", "Payé"])
-        submit_res = form_res.form_submit_button("Sauvegarder la réservation")
-        
-        if submit_res:
-            if client and event_name:
-                check = query_db("SELECT id FROM reservations WHERE date_event = ?", (str(date_ev),))
-                if not check.empty:
-                    pd_st.error(f"❌ Un événement est déjà prévu pour le {date_ev} !")
-                else:
-                    query_db("INSERT INTO reservations (client, date_event, event_name, status) VALUES (?, ?, ?, ?)",
-                             (client, str(date_ev), event_name, status), is_select=False)
-                    pd_st.success("✅ Réservation verrouillée avec succès !")
+        with pd_st.form("form_res"):
+            client = pd_st.text_input("Nom du Client")
+            date_ev = pd_st.date_input("Date de l'événement", date.today())
+            event_name = pd_st.text_input("Type d'événement (Mariage, Conférence, etc.)")
+            status = pd_st.selectbox("Statut Initial", ["Option", "Confirmé", "Annulé"])
+            submit = pd_st.form_submit_button("Enregistrer la réservation")
+            
+            if submit and client and event_name:
+                if query_db("INSERT INTO reservations (client, date_event, event_name, status) VALUES (%s, %s, %s, %s)", 
+                            (client, str(date_ev), event_name, status), is_select=False):
+                    pd_st.success("Réservation ajoutée avec succès !")
                     pd_st.rerun()
-            else:
-                pd_st.warning("⚠️ Veuillez remplir tous les champs du formulaire.")
-                    
+
     with tab2:
         pd_st.subheader("🔍 Filtrer & Rechercher")
         
-        if 'filter_date' not in pd_st.session_state:
-            pd_st.session_state.filter_date = None
+        # Interface de filtrage par date
+        filtre_date = pd_st.date_input("Sélectionnez une date pour filtrer", date.today())
+        
+        col_btn1, col_btn2 = pd_st.columns(2)
+        with col_btn1:
+            appliquer_filtre = pd_st.button("🔍 Appliquer le filtre par Date")
+        with col_btn2:
+            afficher_tout = pd_st.button("🔄 Afficher tout (Retirer le filtre)")
             
-        col_search1, col_search2 = pd_st.columns(2)
-        with col_search1:
-            search_d = pd_st.date_input("Sélectionnez une date pour filtrer", value=date.today())
-            if pd_st.button("🔍 Appliquer le filtre par Date"):
-                pd_st.session_state.filter_date = str(search_d)
-        with col_search2:
-            pd_st.markdown("<br>", unsafe_allow_html=True)
-            if pd_st.button("🔄 Afficher tout (Retirer le filtre)"):
-                pd_st.session_state.filter_date = None
-                pd_st.rerun()
-                
-        # Extraction brute des données
-        if pd_st.session_state.filter_date:
-            df_all_res = query_db("SELECT id as 'ID', client as 'Client', date_event as 'Date Événement', event_name as 'Événement', status as 'Paiement' FROM reservations WHERE date_event = ?", (pd_st.session_state.filter_date,))
+        # Logique de chargement des données sans alias de texte buggés (Pas de guillemets simples)
+        if appliquer_filtre:
+            query = "SELECT id, client, date_event, event_name, status FROM reservations WHERE date_event = %s"
+            df_filtre = query_db(query, (str(filtre_date),), is_select=True)
         else:
-            df_all_res = query_db("SELECT id as 'ID', client as 'Client', date_event as 'Date Événement', event_name as 'Événement', status as 'Paiement' FROM reservations ORDER BY date_event DESC")
+            query = "SELECT id, client, date_event, event_name, status FROM reservations ORDER BY date_event DESC"
+            df_filtre = query_db(query, (), is_select=True)
             
-        if not df_all_res.empty:
-            # --- CALCUL AUTOMATIQUE DU STATUT CHRONOLOGIQUE ---
-            aujourdhui = date.today()
-            
-            def verifier_chronologie(row_date_str):
-                try:
-                    date_objet = datetime.strptime(row_date_str, "%Y-%m-%d").date()
-                    if date_objet < aujourdhui:
-                        return "⚫ Terminé"
-                    else:
-                        return "🟢 À venir"
-                except:
-                    return "❓ Inconnu"
-            
-            # Injection de la nouvelle colonne calculée
-            df_all_res['Déroulement'] = df_all_res['Date Événement'].apply(verifier_chronologie)
-            
-            # Réorganisation visuelle des colonnes
-            colonnes_ordonnees = ['ID', 'Client', 'Date Événement', 'Événement', 'Déroulement', 'Paiement']
-            pd_st.dataframe(df_all_res[colonnes_ordonnees], use_container_width=True, hide_index=True)
-            
-                        # --- BOUTON D'EXPORT EXCEL DES RÉSERVATIONS ---
-            pd_st.markdown("<br>", unsafe_allow_html=True)
-            buffer_res = io.BytesIO()
-            with pd.ExcelWriter(buffer_res, engine='openpyxl') as writer:
-                df_all_res[colonnes_ordonnees].to_excel(writer, index=False, sheet_name='Planning_Victoria')
-            
-            pd_st.download_button(
-                label="📥 Télécharger le planning des réservations sous Excel (.xlsx)",
-                data=buffer_res.getvalue(),
-                file_name=f"reservations_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+        # Renommage propre des colonnes directement dans Python (et pas dans le SQL)
+        if not df_filtre.empty:
+            df_filtre.columns = ["ID", "Client", "Date Événement", "Type d'Événement", "Statut"]
+            pd_st.dataframe(df_filtre, use_container_width=True)
+        else:
+            pd_st.info("Aucune réservation enregistrée.")
 
-            # --- ZONE DES ACTIONS ---
-            pd_st.markdown("---")
-            pd_st.subheader("🛠️ Actions sur une réservation")
-            
-            res_options = {
-                f"{row['Client']} — {row['Événement']} (ID {row['ID']})": row['ID'] 
-                for _, row in df_all_res.iterrows()
-            }
-            
-            selected_desc = pd_st.selectbox("Sélectionnez le client à modifier ou supprimer", list(res_options.keys()))
-            selected_id = res_options[selected_desc]
-            
-            row_data = query_db("SELECT * FROM reservations WHERE id = ?", (int(selected_id),)).iloc[0]
-            
-            col_act1, col_act2 = pd_st.columns(2)
-            
-            with col_act1:
-                pd_st.markdown("**✏️ Formulaire de Modification**")
-                with pd_st.form(key=f"edit_form_{selected_id}"):
-                    edit_client = pd_st.text_input("Nom du Client", value=row_data['client'])
-                    edit_name = pd_st.text_input("Nature de l'événement", value=row_data['event_name'])
-                    edit_status = pd_st.selectbox("Statut du Paiement", ["Non payé", "Payé"], index=0 if row_data['status'] == "Non payé" else 1)
-                    submit_edit = pd_st.form_submit_button("💾 Enregistrer les modifications")
-                    
-                    if submit_edit:
-                        query_db("UPDATE reservations SET client = ?, event_name = ?, status = ? WHERE id = ?", 
-                                 (edit_client, edit_name, edit_status, int(selected_id)), is_select=False)
-                        pd_st.success("✅ Réservation modifiée avec succès !")
-                        pd_st.rerun()
-                        
-            with col_act2:
-                pd_st.markdown("**❌ Zone de Suppression**")
-                pd_st.warning(f"Attention, vous allez supprimer la réservation de : {row_data['client']}.")
-                if pd_st.button("🗑️ Supprimer définitivement cette réservation", use_container_width=True):
-                    query_db("DELETE FROM receipts WHERE res_id = ?", (int(selected_id),), is_select=False)
-                    query_db("DELETE FROM reservations WHERE id = ?", (int(selected_id),), is_select=False)
-                    pd_st.success("🗑️ Réservation supprimée avec succès !")
-                    pd_st.rerun()
-        else:
-            pd_st.info("Aucune réservation enregistrée en cette date.")
 
 # --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
 # --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
