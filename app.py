@@ -288,8 +288,21 @@ elif menu == "Reservations":
                 file_name=f"reservations_salle_victoria_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        else:
-            pd_st.info("Aucune réservation enregistrée.")
+        # Requête SQL propre sans alias buggés pour Supabase
+query_hist = """
+    SELECT r.id, r.res_id, r.date_pay, r.amount, r.method, r.ref, r.notes 
+    FROM receipts r 
+    ORDER BY r.date_pay DESC
+"""
+df_hist = query_db(query_hist, (), is_select=True)
+
+# Renommage des colonnes géré proprement par Python pour l'affichage
+if not df_hist.empty:
+    df_hist.columns = ["N° Reçu", "ID Réservation", "Date de Paiement", "Montant Versé ($)", "Mode de Paiement", "Référence", "Notes"]
+    pd_st.dataframe(df_hist, use_container_width=True)
+else:
+    pd_st.info("Aucun versement n'a encore été enregistré.")
+
 
 
 # --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
