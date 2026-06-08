@@ -305,9 +305,6 @@ elif menu == "Reservations":
 
 # --- 3. ENREGISTREMENT & GESTION DES REÇUS ---
 # --- 3. ENREGISTREMENT & SUIVI DES AVANCES ET PAIEMENTS ---
-# --- 3. RECUS ET PAIEMENTS ---
-# --- 3. RECUS ET PAIEMENTS ---
-# --- 3. RECUS ET PAIEMENTS ---
 elif menu == "Recus et Paiements":
     pd_st.title("💵 Suivi des Avances & Paiements par Tranches")
     
@@ -367,24 +364,25 @@ elif menu == "Recus et Paiements":
             df_hist_raw["Supprimer"] = False
             
             # 2. CONFIGURATION DE L'ÉDITEUR AVEC AFFICHAGE DU CLIENT ET ÉVÉNEMENT
+                       # 2. CONFIGURATION DE L'ÉDITEUR AVEC DEBLOCAGE DE LA SAISIE (disabled=False)
             edited_df = pd_st.data_editor(
                 df_hist_raw,
                 column_config={
                     "id": pd_st.column_config.NumberColumn("N° Reçu", disabled=True),
                     "client": pd_st.column_config.TextColumn("Nom du Client", disabled=True),
                     "event_name": pd_st.column_config.TextColumn("Événement", disabled=True),
-                    "date_pay": "Date de Paiement",
-                    "amount": pd_st.column_config.NumberColumn("Montant Versé ($)"),
-                    "method": pd_st.column_config.SelectboxColumn("Mode de Paiement", options=["Espèces", "Banque", "Mobile Money"]),
-                    "ref": "Référence",
-                    "notes": "Notes",
-                    "Supprimer": pd_st.column_config.CheckboxColumn("Supprimer ?")
+                    "date_pay": pd_st.column_config.TextColumn("Date de Paiement", disabled=False),
+                    "amount": pd_st.column_config.NumberColumn("Montant Versé ($)", disabled=False),
+                    "method": pd_st.column_config.SelectboxColumn("Mode de Paiement", options=["Espèces", "Banque", "Mobile Money"], disabled=False),
+                    "ref": pd_st.column_config.TextColumn("Référence", disabled=False),
+                    "notes": pd_st.column_config.TextColumn("Notes", disabled=False),
+                    "Supprimer": pd_st.column_config.CheckboxColumn("Supprimer ?", disabled=False)
                 },
                 hide_index=True,
                 use_container_width=True,
                 key="editor_receipts"
             )
-            
+
             if pd_st.button("💾 Enregistrer les changements (Modifications / Suppressions)"):
                 for index, row in edited_df.iterrows():
                     rec_id = int(row['id'])
