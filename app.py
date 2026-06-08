@@ -9,12 +9,9 @@ from psycopg2.extras import RealDictCursor
 pd_st.set_page_config(page_title="Salle Victoria - Management", layout="wide", page_icon="🏢")
 
 def get_db_connection():
-    return psycopg2.connect(
-        host=pd_st.secrets["postgres"]["host"],
-        database=pd_st.secrets["postgres"]["database"],
-        user=pd_st.secrets["postgres"]["user"],
-        password=pd_st.secrets["postgres"]["password"],
-        port=pd_st.secrets["postgres"]["port"]
+    # Connexion directe en utilisant l'URI de vos Secrets Streamlit
+    return psycopg2.connect(pd_st.secrets["connection_uri"])
+
     )
 
 def query_db(query, params=(), is_select=True):
