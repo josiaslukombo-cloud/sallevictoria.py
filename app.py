@@ -59,6 +59,14 @@ pd_st.markdown(f"""
         .kpi-value {{ color: #0F172A; font-size: 28px; font-weight: 700; }}
         h1, h2, h3 {{ color: #1E293B !important; font-weight: 700 !important; }}
         .user-badge {{ background-color: #F1F5F9; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 10px; border: 1px solid #E2E8F0; color: #334155; font-weight: 600; }}
+        /* Masquer l'onglet d'administration Streamlit en bas à droite */
+        iframe[title="Manage app"], 
+        [data-testid="stStatusWidget"], 
+        button[title="View developer options"] {
+            display: none !important;
+            visibility: hidden !important;
+            }
+
     </style>
 """, unsafe_allow_html=True)
 
