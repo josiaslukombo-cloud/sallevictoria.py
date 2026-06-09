@@ -47,28 +47,86 @@ COLOR_REVENUE = "#10B981"
 COLOR_EXPENSE = "#EF4444"  
 
 pd_st.markdown(f"""
+    # --- INJECTION DU DESIGN CSS PERSONNALISÉ ---
+pd_st.markdown("""
     <style>
-        .top-navbar {{ position: fixed; top: 0; left: 0; width: 100%; background-color: {COLOR_PRIMARY}; color: white; text-align: center; padding: 15px 0; font-size: 22px; font-weight: 700; z-index: 9999; box-shadow: 0 4px 6px rgb(0 0 0 / 0.1); letter-spacing: 1px; }}
-        .stApp {{ margin-top: 50px !important; }}
-        .main {{ background-color: #FFFFFF; }}
-        .kpi-card {{ background-color: {COLOR_CARD_BG}; padding: 24px; border-radius: 12px; border-left: 5px solid #64748B; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); margin-bottom: 15px; }}
-        .kpi-revenue {{ border-left-color: {COLOR_REVENUE}; }}
-        .kpi-expense {{ border-left-color: {COLOR_EXPENSE}; }}
-        .kpi-solde {{ border-left-color: #3B82F6; }}
-        .kpi-title {{ color: #64748B; font-size: 14px; font-weight: 600; text-transform: uppercase; margin-bottom: 8px; }}
-        .kpi-value {{ color: #0F172A; font-size: 28px; font-weight: 700; }}
-        h1, h2, h3 {{ color: #1E293B !important; font-weight: 700 !important; }}
-        .user-badge {{ background-color: #F1F5F9; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 10px; border: 1px solid #E2E8F0; color: #334155; font-weight: 600; }}
         /* Masquer l'onglet d'administration Streamlit en bas à droite */
-        iframe[title="Manage app"], 
-        [data-testid="stStatusWidget"], 
-        button[title="View developer options"] {
+        iframe[title="Manage app"], [data-testid="stStatusWidget"], button[title="View developer options"] {
             display: none !important;
             visibility: hidden !important;
-            }
-
+        }
+        
+        /* Barre supérieure horizontale fixe */
+        .top-navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: #1E293B;
+            color: white;
+            text-align: center;
+            padding: 15px 0;
+            font-size: 22px;
+            font-weight: 700;
+            z-index: 9999;
+            box-shadow: 0 4px 6px rgb(0 0 0 / 0.1);
+            letter-spacing: 1px;
+        }
+        
+        /* Correctif pour empêcher le contenu caché */
+        .stApp {
+            margin-top: 50px !important;
+        }
+        
+        /* Style général de l'application */
+        .main { background-color: #FFFFFF; }
+        
+        /* Design des cartes KPI personnalisées */
+        .kpi-card {
+            background-color: #F8FAFC;
+            padding: 24px;
+            border-radius: 12px;
+            border-left: 5px solid #64748B;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+            margin-bottom: 15px;
+        }
+        .kpi-revenue { border-left-color: #10B981; }
+        .kpi-expense { border-left-color: #EF4444; }
+        .kpi-solde { border-left-color: #3B82F6; }
+        
+        .kpi-title {
+            color: #64748B;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .kpi-value {
+            color: #0F172A;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        
+        /* En-têtes stylisés */
+        h1, h2, h3 {
+            color: #1E293B !important;
+            font-weight: 700 !important;
+        }
+        
+        /* Widget utilisateur en haut de la sidebar */
+        .user-badge {
+            background-color: #F1F5F9;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 10px;
+            border: 1px solid #E2E8F0;
+            color: #334155;
+            font-weight: 600;
+        }
     </style>
 """, unsafe_allow_html=True)
+
 
 if 'logged_in' not in pd_st.session_state:
     pd_st.session_state['logged_in'] = False
